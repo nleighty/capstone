@@ -1,0 +1,28 @@
+services:
+  juice-shop:
+    image: bkimminich/juice-shop
+    container_name: juice-shop
+    networks:
+      - waf-net
+
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    container_name: waf
+    ports:
+      - "8080:8080"
+    environment:
+      BACKEND: "http://juice-shop:3000"
+      PARANOIA: "1"
+      ACCESSLOG: "/var/log/waf-logs/access.log"
+      ERRORLOG: "/var/log/waf-logs/error.log"
+    volumes:
+      - ./modsec-rules/ai_generated_rules.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
+      - ./logs:/var/log/waf-logs
+    networks:
+      - waf-net
+    depends_on:
+      - juice-shop
+
+networks:
+  waf-net:
+    driver: bridge

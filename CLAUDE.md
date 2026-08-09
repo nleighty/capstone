@@ -1,0 +1,93 @@
+# Capstone Project
+
+**Title:** An Adaptive Defense Framework Against GenAI-Driven Web Payload Polymorphism Using MCP
+**Student:** Nic Leighty | **Advisor:** Jiazhen Zhou | **Semester:** Fall 2026 | **Credits:** 6
+Full proposal: `docs/proposal/Proposal_20260703.pdf` (architecture diagram also at
+`docs/proposal/diagram_20260609.png`).
+
+## What this is
+A self-healing WAF defense framework, orchestrated over MCP, that closes the loop between an
+AI-driven attacker and an AI-driven defender:
+
+- **Offensive side**: a local LLM (Ollama/Llama-3) obfuscates standard SQLi/XSS payloads into
+  polymorphic variants and fires them at the target through the WAF.
+- **Target + WAF**: OWASP Juice Shop behind an Nginx/ModSecurity (OWASP CRS) reverse proxy.
+- **Defensive side**: a LangGraph agent that, once a breach threshold is crossed, reads WAF logs,
+  identifies the mutation pattern, and writes a new idempotent WAF rule — via a custom Python MCP
+  server (FastAPI-MCP) exposing: `read_waf_logs()`, `test_waf_configuration()`,
+  `write_idempotent_rule()`, `reload_waf()`.
+- **Evaluation**: an independent test harness scores each cycle on Mean Time to Mitigation (MTTM),
+  Bypass Decay Rate (α, across attack waves of 50 payloads), Rule Generality Index (RGI — does a
+  rule generalize to unseen variants, not just the one it was written for), and Regressive False
+  Positive Rate (RFPR, target 0% — patches must not break benign traffic).
+
+Everything runs local/containerized (WSL2 host), zero budget, LLM-agnostic by design (defensive
+side could swap to a different LLM via MCP; offensive side is intentionally hardcoded to the local
+LLM since cloud LLMs guardrail against generating exploits).
+
+## Timeline (see proposal for full detail/dates)
+1. Environment Setup — Docker for WAF + Juice Shop, logging, rule-injection target ✅ **Sprint 1 done**
+2. Attacker Pipeline & Test Harness — Ollama payload mutation, test orchestrator
+3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking
+4. Agent Integration & Dry Runs — LangGraph agent wired to MCP tools, idempotent rule IDs
+5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
+6. Report finalization, then presentation prep
+
+Timeline is agile/subject to change per the proposal — treat sprint summaries as the source of truth
+over this list.
+
+## Repo layout
+- `docs/` — project-wide material: the proposal, diagram, overall milestones, anything that spans
+  subprojects.
+  - `docs/design-notes.md` — pre-proposal architecture reasoning (threshold tracking approach,
+    the Scoped Inclusion idempotency pattern, per-metric implementation notes, an early/superseded
+    MCP server sketch, LLM-swapping approach). Read this before implementing the MCP server or the
+    metrics/test-harness pieces — it's the "why" behind several proposal decisions.
+  - `docs/meeting-notes.md` — advisor meeting log (scope decisions, meeting cadence, open questions
+    raised by the advisor).
+- `waf-defense/` — the current subproject: Docker environment (target app + ModSecurity WAF),
+  logging, and the rule-injection target the defensive agent will write to.
+  - `waf-defense/docs/` — sprint summaries and debug notes specific to this subproject.
+- Future subprojects (offensive pipeline, MCP server, defensive agent) will likely land as sibling
+  directories here, each with their own `docs/` if needed.
+
+## Where to look for current status
+Don't treat this file as the status tracker — check the most recent sprint summary in the relevant
+subproject's `docs/` folder (e.g. `waf-defense/docs/Sprint1_Summary.md`) for what's actually done
+and what's next.
+
+## Conventions
+- Sprint summaries live in `<subproject>/docs/Sprint<N>_Summary.md`.
+- Non-obvious implementation gotchas get their own debug-notes file rather than bloating the sprint
+  summary (see `waf-defense/docs/debug-notes-sprint1-paths.md` for the pattern).
+
+## Organizing documentation — full latitude, no need to ask
+I have standing permission to create new doc files/folders, rename or move existing ones, and split
+or merge docs whenever the current structure stops fitting a growing project — no need to check
+first. This is how `docs/design-notes.md`, `docs/meeting-notes.md`, and `docs/proposal/` came to
+exist: raw/freeform notes in, organized structure and naming out, without being told exact
+filenames or layout.
+
+Guardrails while exercising that latitude:
+- Creating, renaming, splitting, and merging docs needs no permission. Deleting content is
+  different: if something looks stale, inaccurate, or superseded, flag it and ask which the user
+  wants — annotate it in place (see the ⚠️ *superseded* notes in `docs/meeting-notes.md` for the
+  pattern) or delete it outright. Don't decide that unilaterally either way.
+- Whenever a doc is added, renamed, or moved, update the "Repo layout" section above in the same
+  edit, so it never drifts out of sync with what's actually on disk.
+- Say what changed and why in the same turn. Full latitude means not needing permission first, not
+  operating silently — the user should always be able to see what got reorganized.
+
+## Capture context automatically — don't wait to be asked
+This project spans many chats, and only what's written to a file survives between them. So: when a
+sprint wraps, a design decision gets made, an implementation deviates from the proposal, or a
+non-trivial bug gets root-caused, write it down before the session ends — proactively, without
+waiting for an explicit instruction to do so.
+- Subproject-specific outcomes (a sprint finishing, an implementation choice scoped to one
+  subproject, a debugging war story) → that subproject's `docs/` (a `Sprint<N>_Summary.md` update
+  or a new debug-notes file).
+- Project-wide decisions (scope changes, architecture pivots, a new subproject being added) →
+  update this file directly.
+Keep entries factual and concise — capture *what changed and why*, not a transcript of the
+conversation. If unsure whether something's worth recording, err toward recording it: cheap to
+ignore later, expensive to have lost.
