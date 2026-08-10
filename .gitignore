@@ -1,5 +1,6 @@
 # Logs
 waf-defense/logs/*.log
+attacker-pipeline/metrics/*.csv
 
 # Secrets / env
 .env
@@ -16,3 +17,6 @@ node_modules/
 
 # OS cruft
 .DS_Store
+
+# Claude Code runtime state (session locks, etc.) — not meant to be versioned
+.claude/
