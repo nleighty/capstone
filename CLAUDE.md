@@ -27,7 +27,7 @@ LLM since cloud LLMs guardrail against generating exploits).
 
 ## Timeline (see proposal for full detail/dates)
 1. Environment Setup — Docker for WAF + Juice Shop, logging, rule-injection target ✅ **Sprint 1 done**
-2. Attacker Pipeline & Test Harness — Ollama payload mutation, test orchestrator
+2. Attacker Pipeline & Test Harness — Ollama payload mutation, test orchestrator ✅ **Sprint 2 done**
 3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking
 4. Agent Integration & Dry Runs — LangGraph agent wired to MCP tools, idempotent rule IDs
 5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
@@ -45,11 +45,21 @@ over this list.
     metrics/test-harness pieces — it's the "why" behind several proposal decisions.
   - `docs/meeting-notes.md` — advisor meeting log (scope decisions, meeting cadence, open questions
     raised by the advisor).
-- `waf-defense/` — the current subproject: Docker environment (target app + ModSecurity WAF),
-  logging, and the rule-injection target the defensive agent will write to.
+  - `docs/demo-walkthrough.md` — rehearsable, self-run script for demoing the offensive pipeline
+    concept of operations to the advisor (or anyone else) without relying on an AI executing it live.
+  - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
+    attacker pipeline) spanning `waf-defense/` and `attacker-pipeline/`.
+- `waf-defense/` — Docker environment (target app + ModSecurity WAF), logging, and the
+  rule-injection target the defensive agent will write to.
   - `waf-defense/docs/` — sprint summaries and debug notes specific to this subproject.
-- Future subprojects (offensive pipeline, MCP server, defensive agent) will likely land as sibling
-  directories here, each with their own `docs/` if needed.
+- `attacker-pipeline/` — the offensive pipeline: local Ollama payload mutation (`core/mutate.py`),
+  attack firing against the WAF (`core/fire.py`), and the test orchestrator/harness that runs
+  attack waves and writes baseline metrics (`harness/`). Seed payloads live in `payloads/seeds.py`;
+  metrics land in `attacker-pipeline/metrics/` (gitignored CSVs).
+  - `attacker-pipeline/docs/` — sprint summaries, debug notes, and `future-improvements.md`
+    (proposed-but-not-yet-built enhancements) specific to this subproject.
+- Future subprojects (MCP server, defensive agent) will likely land as sibling directories here,
+  each with their own `docs/` if needed.
 
 ## Where to look for current status
 Don't treat this file as the status tracker — check the most recent sprint summary in the relevant
@@ -60,6 +70,17 @@ and what's next.
 - Sprint summaries live in `<subproject>/docs/Sprint<N>_Summary.md`.
 - Non-obvious implementation gotchas get their own debug-notes file rather than bloating the sprint
   summary (see `waf-defense/docs/debug-notes-sprint1-paths.md` for the pattern).
+- Proposed-but-not-yet-built enhancements (not in scope for any current sprint) go in
+  `<subproject>/docs/future-improvements.md`, not in a code comment alone or in an operational
+  reference doc like `docs/common-commands.md` — keep "what to run" and "ideas for later" separate.
+- **Code comments — moderate, not zero, not exhaustive.** This is a capstone project an advisor and
+  graders will read, not a fast-moving production codebase, so lean toward more explanation than
+  you would elsewhere: a short module-level docstring explaining what the file is/why it exists,
+  docstrings on non-trivial functions/classes explaining intent (not just restating the signature),
+  and inline comments wherever the *why* isn't obvious from the code alone (a design tradeoff, a
+  workaround, a non-obvious ordering requirement). Skip comments that just restate what a
+  well-named line already says. See `attacker-pipeline/core/mutate.py` or
+  `attacker-pipeline/harness/orchestrator.py` for the target density.
 
 ## Organizing documentation — full latitude, no need to ask
 I have standing permission to create new doc files/folders, rename or move existing ones, and split
