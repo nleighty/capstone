@@ -65,7 +65,7 @@ curl -s http://localhost:11434/api/tags
 ```
 Warm up the model once after starting (avoids a slow first call later):
 ```bash
-curl -s http://localhost:11434/api/generate -d '{"model":"llama3","prompt":"hello","stream":false}' > /dev/null
+curl -s http://localhost:11434/api/generate -d '{"model":"llama3","prompt":"hello","stream":false}'
 ```
 
 ## Running the attacker pipeline
