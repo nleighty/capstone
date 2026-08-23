@@ -1,0 +1,4 @@
+{
+    "python.analysis.typeCheckingMode": "standard",
+    "python.defaultInterpreterPath": "${workspaceFolder}/attacker-pipeline/.venv/bin/python"
+}
