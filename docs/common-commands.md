@@ -42,22 +42,25 @@ sudo truncate -s 0 /home/nicle/capstone/waf-defense/logs/access.log /home/nicle/
 
 ## Ollama
 
-Current install is manual/user-space at `~/.local/bin/ollama` (no systemd service yet — see
-`attacker-pipeline/docs/debug-notes-sprint2-log-granularity.md` for why, and the deferred plan +
-cleanup checklist for switching to the official installer).
+Installed via the official installer as a systemd service (`ollama.service`), backed by
+`/usr/local/bin/ollama` — see `attacker-pipeline/docs/debug-notes-sprint2-log-granularity.md` for
+the migration history (this WSL2 distro needed systemd enabled via `/etc/wsl.conf` first, since it
+had none). The service is enabled, so it starts automatically whenever this WSL distro boots — no
+manual `ollama serve` step needed day-to-day.
 
-Start:
+Status:
 ```bash
-nohup ollama serve > /tmp/ollama-serve.log 2>&1 &
-disown
+systemctl status ollama
 ```
-Find the running PID:
+Start / stop / restart (rarely needed — it's already running):
 ```bash
-pgrep -f "ollama serve"
+sudo systemctl start ollama
+sudo systemctl stop ollama
+sudo systemctl restart ollama
 ```
-Stop:
+Tail the service log:
 ```bash
-kill $(pgrep -f "ollama serve")
+journalctl -u ollama -f
 ```
 Confirm it's up and `llama3` is loaded:
 ```bash

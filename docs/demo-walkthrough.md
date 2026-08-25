@@ -35,8 +35,9 @@ rehearsal) gets mistaken for or mixed into the thesis's metrics later.
    ```bash
    curl -s http://localhost:11434/api/tags
    ```
-   Expect `llama3` in the JSON response. If Ollama isn't running, start it (see your notes on
-   which install you're using — native `ollama serve`, or the systemd service if you've switched).
+   Expect `llama3` in the JSON response. Ollama runs as a systemd service (`ollama.service`) and
+   auto-starts with WSL, so this should already be up; if not, `sudo systemctl start ollama` (see
+   `docs/common-commands.md`'s Ollama section).
 
 3. **Warm up the model once** (the first generation call after Ollama starts loads the model into
    memory and is noticeably slower — do this now so the live demo's first LLM call isn't an awkward
@@ -129,8 +130,8 @@ signature-based ruleset just... didn't recognize it."
 ## If something breaks live
 
 - **Container down:** `docker compose -f ~/capstone/waf-defense/docker-compose.yml up -d`, wait ~10s.
-- **Ollama not responding:** check `curl localhost:11434/api/tags`; restart per whichever install
-  you're running.
+- **Ollama not responding:** check `curl localhost:11434/api/tags`; `sudo systemctl restart ollama`
+  if needed.
 - **Running low on time:** skip Step 5's live run — instead show the *already-generated* demo CSV
   from tonight's rehearsal and Step 4's log tail as a recording of what just happened, and narrate
   Step 6/7 against that. Rehearsing tonight is exactly what makes this fallback available.

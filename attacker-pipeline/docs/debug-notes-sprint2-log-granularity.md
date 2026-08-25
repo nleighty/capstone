@@ -79,18 +79,14 @@ for a `sudo` password to write to `/usr/local`; this shell has no TTY to satisfy
 None of this affects the project's design — purely an artifact of installing in a non-interactive,
 no-root shell rather than a normal desktop session.
 
-**Follow-up, deferred to a future sprint:** switch to the official installer (run manually, since it
-needs an interactive `sudo` password) for a standard `/usr/local` + systemd-service install instead
-of this manual `~/.local` one. Requires re-pulling `llama3` (~4.7GB) under the installer's dedicated
-`ollama` service-user model storage, and removing `~/.local/bin/ollama` / `~/.local/lib/ollama`
-afterward so `ollama` on `PATH` resolves unambiguously to the standard install. Not done yet —
-deliberately deferred past the 2026-08-10 advisor demo to avoid any risk of Ollama being down during
-that window.
-
-**Cleanup checklist for when that switch happens:**
-- Remove `~/.local/bin/ollama` and `~/.local/lib/ollama`.
-- Revert the PATH block added to `~/.bashrc` (search for "User-space Ollama install") — it exists
-  only to make the manual `~/.local/bin` install resolve in a normal interactive terminal; the
-  official install puts `ollama` on `/usr/local/bin`, already on `PATH` by default, so this block
-  becomes dead weight once the switch is done.
-- Confirm `which ollama` resolves to `/usr/local/bin/ollama` in a fresh terminal afterward.
+**Resolved 2026-08-25:** switched to the official installer, run manually by the user (needed an
+interactive `sudo` password my shell couldn't supply). This *also* required enabling systemd inside
+this WSL2 distro first — the official installer's unit only runs under a real init system, and this
+distro had none — via `/etc/wsl.conf` (`[boot]` / `systemd=true`) plus `wsl --shutdown` and a
+restart. `ollama.service` is now enabled + active, backed by `/usr/local/bin/ollama`; `llama3` was
+re-pulled (~4.7GB) under the installer's dedicated `ollama` service-user model storage
+(`/usr/share/ollama/.ollama/models`); the old `~/.local/bin/ollama` / `~/.local/lib/ollama` and the
+now-dead `~/.bashrc` PATH block (search history for "User-space Ollama install" if it ever
+reappears) were removed. `which ollama` resolves to `/usr/local/bin/ollama` in a fresh shell.
+Operational start/stop/status commands are now in `docs/common-commands.md`'s Ollama section — the
+manual `nohup ollama serve &` workflow described there previously no longer applies.
