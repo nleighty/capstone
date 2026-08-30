@@ -113,6 +113,13 @@ def reload_waf() -> str:
 validation step, likely `nginx -t` or equivalent, run before `reload_waf()` to catch a bad rule
 before it takes down the WAF.)
 
+> ⚠️ **Correction (Sprint 3):** the sketch above targets `REQUEST_COOKIES|REQUEST_PARAMETERS`, but
+> `REQUEST_PARAMETERS` isn't a real ModSecurity variable — the actual collection is `ARGS`. Caught by
+> `test_waf_configuration()` rejecting the generated rule the first time it was tried against the
+> real WAF; see `mcp-server/docs/debug-notes-sprint3-rule-syntax.md`. The implemented version in
+> `mcp-server/core/rule_writer.py` uses `REQUEST_COOKIES|ARGS` with an explicit `@rx` operator.
+> Left the original text below unedited as the historical record of the sketch.
+
 Names here match the proposal's finalized tool set: `read_waf_logs()`, `test_waf_configuration()`,
 `write_idempotent_rule()`, `reload_waf()`. This is still just a conceptual sketch, not
 implementation — the actual overwrite-in-place logic (find the line starting with `rule_id`,

@@ -93,6 +93,31 @@ Common invocations:
 
 For proposed-but-not-yet-built CLI flags, see `attacker-pipeline/docs/future-improvements.md`.
 
+## Running the MCP server
+
+Standalone service, listens on `http://127.0.0.1:8000/mcp` (streamable-HTTP) until stopped:
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python server.py
+```
+
+Exposes 5 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `test_waf_configuration`,
+`write_idempotent_rule`, `reload_waf`. See `mcp-server/docs/Sprint3_Summary.md` for what each does.
+
+Resetting between test runs (clears `ai_generated_rules.conf`, truncates the WAF log files —
+prompts for `sudo`, run from a real terminal, not scripted/non-interactively):
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python reset_state.py
+```
+After running it, restart the server (its in-memory breach tally only resets on restart) and
+reload the WAF so it picks up the now-empty rules file:
+```bash
+docker exec waf nginx -s reload
+```
+
 ## Metrics output
 
 CSVs land in `attacker-pipeline/metrics/` (gitignored), one per run: `run_<timestamp>.csv` for

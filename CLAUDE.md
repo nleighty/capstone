@@ -14,8 +14,8 @@ AI-driven attacker and an AI-driven defender:
 - **Target + WAF**: OWASP Juice Shop behind an Nginx/ModSecurity (OWASP CRS) reverse proxy.
 - **Defensive side**: a LangGraph agent that, once a breach threshold is crossed, reads WAF logs,
   identifies the mutation pattern, and writes a new idempotent WAF rule — via a custom Python MCP
-  server (FastAPI-MCP) exposing: `read_waf_logs()`, `test_waf_configuration()`,
-  `write_idempotent_rule()`, `reload_waf()`.
+  server (built on the official `mcp` SDK, `mcp-server/`) exposing: `read_waf_logs()`,
+  `get_breach_status()`, `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()`.
 - **Evaluation**: an independent test harness scores each cycle on Mean Time to Mitigation (MTTM),
   Bypass Decay Rate (α, across attack waves of 50 payloads), Rule Generality Index (RGI — does a
   rule generalize to unseen variants, not just the one it was written for), and Regressive False
@@ -28,7 +28,7 @@ LLM since cloud LLMs guardrail against generating exploits).
 ## Timeline (see proposal for full detail/dates)
 1. Environment Setup — Docker for WAF + Juice Shop, logging, rule-injection target ✅ **Sprint 1 done**
 2. Attacker Pipeline & Test Harness — Ollama payload mutation, test orchestrator ✅ **Sprint 2 done**
-3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking
+3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking ✅ **Sprint 3 done**
 4. Agent Integration & Dry Runs — LangGraph agent wired to MCP tools, idempotent rule IDs
 5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
 6. Report finalization, then presentation prep
@@ -48,7 +48,8 @@ over this list.
   - `docs/demo-walkthrough.md` — rehearsable, self-run script for demoing the offensive pipeline
     concept of operations to the advisor (or anyone else) without relying on an AI executing it live.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
-    attacker pipeline) spanning `waf-defense/` and `attacker-pipeline/`.
+    attacker pipeline, running the MCP server) spanning `waf-defense/`, `attacker-pipeline/`, and
+    `mcp-server/`.
 - `waf-defense/` — Docker environment (target app + ModSecurity WAF), logging, and the
   rule-injection target the defensive agent will write to.
   - `waf-defense/docs/` — sprint summaries and debug notes specific to this subproject.
@@ -58,7 +59,13 @@ over this list.
   metrics land in `attacker-pipeline/metrics/` (gitignored CSVs).
   - `attacker-pipeline/docs/` — sprint summaries, debug notes, and `future-improvements.md`
     (proposed-but-not-yet-built enhancements) specific to this subproject.
-- Future subprojects (MCP server, defensive agent) will likely land as sibling directories here,
+- `mcp-server/` — the defensive MCP server: exposes `read_waf_logs()`, `get_breach_status()`,
+  `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()` as MCP tools over
+  streamable-HTTP, plus per-endpoint breach-threshold tracking (`core/log_parser.py`) and an
+  operator-only `reset_state.py` for clearing rules/logs between test runs. This is the future
+  Sprint 4 defensive agent's tool layer, not the agent itself.
+  - `mcp-server/docs/` — sprint summaries and debug notes specific to this subproject.
+- Future subprojects (the defensive agent itself) will likely land as sibling directories here,
   each with their own `docs/` if needed.
 
 ## Where to look for current status
