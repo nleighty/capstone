@@ -22,11 +22,17 @@ WAF_CONTAINER_NAME = os.environ.get("WAF_CONTAINER_NAME", "waf")
 # Default of 5 matches the example used in docs/design-notes.md.
 BREACH_THRESHOLD = int(os.environ.get("BREACH_THRESHOLD", 5))
 
-# Custom ModSecurity rule IDs are conventionally reserved in this range
-# (docs/design-notes.md, "Scoped Inclusion" pattern) so they never collide
-# with CRS's own rule IDs (900000-999999 vs. CRS's 9xxxxx/949xxx ranges).
-CUSTOM_RULE_ID_MIN = 900000
-CUSTOM_RULE_ID_MAX = 999999
+# Custom ModSecurity rule IDs, per the "Scoped Inclusion" pattern
+# (docs/design-notes.md). NOTE: 900000-999999 is NOT free for custom rules -
+# that whole block is CRS's own reserved range (confirmed against the real
+# ruleset shipped in owasp/modsecurity-crs, and CRS's own docs/CHANGES.md:
+# "rule IDs to start from CRS reserved range: 900000"). Using 900000-999999
+# here risked an AI-picked rule_id silently colliding with a real CRS rule
+# (e.g. 949110, the anomaly-scoring rule). 1000000-1999999 is a 7-digit
+# range, so it can never overlap CRS's 6-digit block - see
+# docs/design-notes.md's annotation and mcp-server/docs for the correction.
+CUSTOM_RULE_ID_MIN = 1000000
+CUSTOM_RULE_ID_MAX = 1999999
 
 MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.environ.get("MCP_PORT", 8000))

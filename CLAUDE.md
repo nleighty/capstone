@@ -47,6 +47,9 @@ over this list.
     raised by the advisor).
   - `docs/demo-walkthrough.md` — rehearsable, self-run script for demoing the offensive pipeline
     concept of operations to the advisor (or anyone else) without relying on an AI executing it live.
+  - `docs/demo-walkthrough-mcp.md` — same pattern, for the Sprint 3 defensive MCP server. Written to
+    run standalone (no attacker-pipeline dependency) or combined with a wave fired from the other
+    walkthrough — see that doc for which to use.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
     attacker pipeline, running the MCP server) spanning `waf-defense/`, `attacker-pipeline/`, and
     `mcp-server/`.

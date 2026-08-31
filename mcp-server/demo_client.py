@@ -23,8 +23,11 @@ SERVER_URL = f"http://{config.MCP_HOST}:{config.MCP_PORT}/mcp"
 _REQUIRED = object()
 
 # menu key -> (tool name, [(arg name, caster, default-or-_REQUIRED), ...])
+# read_waf_logs's [("lines", ...)] entry here is a fallback only - main()
+# overrides it per-call with a default computed from get_breach_status(),
+# so a demo run doesn't silently tail fewer lines than the wave produced.
 _TOOLS = {
-    "1": ("read_waf_logs", [("lines", int, 200)]),
+    "1": ("read_waf_logs", [("lines", int, 50)]),
     "2": ("get_breach_status", [("endpoint", str, None)]),
     "3": ("test_waf_configuration", []),
     "4": (
@@ -61,6 +64,20 @@ def _prompt_args(spec: list[tuple[str, type, object]]) -> dict:
     return args
 
 
+async def _breach_total(session: ClientSession) -> int:
+    """Sum blocked-request counts across all endpoints, so read_waf_logs can
+    default its `lines` argument to "enough to cover everything the breach
+    tracker has seen" instead of a fixed guess that might be too small for a
+    larger-than-expected wave.
+    """
+    result = await session.call_tool("get_breach_status", {})
+    status = result.structured_content
+    if status is None:
+        text = "".join(getattr(block, "text", "") for block in result.content)
+        status = json.loads(text)
+    return sum(status.get("counts", {}).values())
+
+
 def _print_result(result) -> None:
     if result.structured_content is not None:
         print(json.dumps(result.structured_content, indent=2))
@@ -90,6 +107,14 @@ async def main() -> None:
                     continue
 
                 name, spec = _TOOLS[choice]
+                if name == "read_waf_logs":
+                    total = await _breach_total(session)
+                    default_lines = max(total, 50)
+                    print(
+                        f"  (get_breach_status reports {total} blocked requests so far - "
+                        f"defaulting lines to {default_lines})"
+                    )
+                    spec = [("lines", int, default_lines)]
                 args = _prompt_args(spec)
                 result = await session.call_tool(name, args)
                 print(f"\n--- {name} result ---")

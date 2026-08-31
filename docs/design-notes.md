@@ -24,6 +24,15 @@ Solution (this is what Sprint 1's rule-injection target implements):
    `ai_generated_rules.conf`, included from the main config via a single `Include` directive.
 2. Every custom rule gets a unique numeric ID. ModSecurity convention: custom rule IDs in the
    `900000`–`999999` range.
+
+   > ⚠️ **Correction (Sprint 3, discovered 2026-08-31):** this range is wrong - `900000`–`999999` is
+   > not free for custom/local rules, it's CRS's *own* reserved range. Confirmed against the real
+   > ruleset shipped in `owasp/modsecurity-crs` (rule prefixes 901/905/911/913/920-922/930-934/
+   > 941-944/949/950-956/959/980 all fall in this block) and CRS's own `docs/CHANGES.md`: "rule IDs
+   > to start from CRS reserved range: 900000." Using this range for custom rules risked an
+   > AI-picked `rule_id` silently colliding with a real CRS rule (e.g. `949110`, the anomaly-scoring
+   > rule referenced throughout `waf-defense/logs/error.log`). `mcp-server/config.py` now reserves
+   > `1000000`–`1999999` instead - a 7-digit range that can't overlap CRS's 6-digit block.
 3. Force the LLM's output into a strict schema tied to a stable ID per attack vector, e.g.:
    ```json
    {

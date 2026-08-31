@@ -34,12 +34,20 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   technique as `attacker-pipeline/harness/log_reader.py`'s `LogReader` (reimplemented rather than
   imported, since this is core/production code and that module is the test-harness layer).
 - **`core/rule_writer.py`** — builds and idempotently writes the `SecRule` line; validates
-  `rule_id` falls in the reserved 900000-999999 custom range.
+  `rule_id` falls in the reserved 1000000-1999999 custom range (see "Issues Encountered" below —
+  this was originally 900000-999999 and got corrected the day after this sprint wrapped).
 - **`core/waf_control.py`** — thin `docker exec` wrappers, confirmed against the real container
   before being wired in.
 - **`reset_state.py`** — operator-only script (deliberately *not* an MCP tool - see "Design
   decisions" below) that clears `ai_generated_rules.conf` and truncates the WAF log files, for
   resetting between test runs.
+- **`demo_client.py`** (added 2026-08-31) — small interactive MCP client, standing in for the
+  not-yet-built Sprint 4 agent so the five tools can be demoed/exercised by hand without hand-typing
+  MCP protocol calls live. Numbered menu over the five tools; for `read_waf_logs`, it calls
+  `get_breach_status()` first and defaults the `lines` argument to the current total blocked-request
+  count (floor of 50) instead of a fixed guess, so a demo run doesn't silently miss log lines from a
+  larger-than-expected wave. See `docs/common-commands.md` for usage and
+  `docs/demo-walkthrough-mcp.md` for a full rehearsable script built around it.
 
 ## Design decisions made this sprint
 
@@ -71,6 +79,14 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   `sudo`; `reset_state.py` shells out to the same `sudo truncate` rather than trying to
   delete-and-recreate the files (which would silently break logging, since nginx holds the old
   file open and a replaced file wouldn't receive further writes).
+- **The custom rule ID range (900000-999999) actually collided with CRS's own reserved range**
+  (found 2026-08-31, one day after this sprint wrapped, while walking through the code with the
+  advisor-facing write-up). `docs/design-notes.md`'s original sketch had the convention backwards -
+  that whole block is reserved *by* CRS for its own rules (confirmed against the real ruleset and
+  CRS's own `docs/CHANGES.md`), not free for custom ones. An AI-picked `rule_id` could have silently
+  collided with a real CRS rule (e.g. `949110`). Fixed by moving `config.CUSTOM_RULE_ID_MIN/MAX` to
+  `1000000`-`1999999` (a 7-digit range, provably disjoint from CRS's 6-digit block). See the
+  annotation at `docs/design-notes.md`'s original sketch for the full correction.
 
 ## Validation
 

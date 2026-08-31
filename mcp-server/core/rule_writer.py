@@ -17,8 +17,8 @@ _RULE_TEMPLATE = (
 
 
 def _id_line_pattern(rule_id: int) -> re.Pattern:
-    # The trailing comma disambiguates e.g. id:900001 from id:9000010 - the
-    # latter would not contain the literal substring "id:900001," anywhere.
+    # The trailing comma disambiguates e.g. id:1000001 from id:10000010 - the
+    # latter would not contain the literal substring "id:1000001," anywhere.
     return re.compile(r"id:%d," % rule_id)
 
 
