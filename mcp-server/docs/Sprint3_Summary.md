@@ -23,10 +23,14 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   always-on local service (matching the WAF/Ollama pattern already used elsewhere in the project)
   testable on its own, independent of any agent.
   - `read_waf_logs(lines)` — tails the raw error log.
-  - `get_breach_status(endpoint=None)` — the new "tripwire" tool: per-endpoint breach counts
-    (query string stripped) plus which endpoints have crossed `config.BREACH_THRESHOLD` (default
-    5). Not one of the proposal's original four named tools, but called out separately in the
-    Sprint 3 timeline bullet ("threshold tracking") as its own deliverable.
+  - `get_breach_status(endpoint=None)` — the new "tripwire" tool: per-endpoint bypass counts
+    (query string stripped; any non-`403` response to a wave-marked request, since that's what
+    "the WAF didn't catch this" means regardless of what the app did with it afterward) plus which
+    endpoints have crossed `config.BREACH_THRESHOLD` (default 5). Blocked counts are tracked too as
+    telemetry, but never decide the threshold — a blocked payload is already handled, so it isn't
+    the gap a new rule needs to close. Not one of the proposal's original four named tools, but
+    called out separately in the proposal's Sprint 3 timeline bullet ("threshold tracking") as its own
+    deliverable.
   - `test_waf_configuration()` / `reload_waf()` — `docker exec waf nginx -t` / `nginx -s reload`.
   - `write_idempotent_rule(rule_id, attack_pattern, description)` — the Scoped Inclusion pattern
     from `docs/design-notes.md`: overwrites the line for an existing `rule_id`, appends if new.
@@ -34,8 +38,8 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   technique as `attacker-pipeline/harness/log_reader.py`'s `LogReader` (reimplemented rather than
   imported, since this is core/production code and that module is the test-harness layer).
 - **`core/rule_writer.py`** — builds and idempotently writes the `SecRule` line; validates
-  `rule_id` falls in the reserved 1000000-1999999 custom range (see "Issues Encountered" below —
-  this was originally 900000-999999 and got corrected).
+  `rule_id` falls in the reserved 1000000-1999999 custom range (disjoint from CRS's own
+  900000-999999 block — see "Issues Encountered" below).
 - **`core/waf_control.py`** — thin `docker exec` wrappers, confirmed against the real container
   before being wired in.
 - **`reset_state.py`** — operator-only script (deliberately *not* an MCP tool - see "Design
@@ -79,14 +83,6 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   `sudo`; `reset_state.py` shells out to the same `sudo truncate` rather than trying to
   delete-and-recreate the files (which would silently break logging, since nginx holds the old
   file open and a replaced file wouldn't receive further writes).
-- **The custom rule ID range (900000-999999) actually collided with CRS's own reserved range**
-  `docs/design-notes.md`'s original sketch had the convention backwards -
-  that whole block is reserved *by* CRS for its own rules (confirmed against the real ruleset and
-  CRS's own `docs/CHANGES.md`), not free for custom ones. An AI-picked `rule_id` could have silently
-  collided with a real CRS rule (e.g. `949110`). Fixed by moving `config.CUSTOM_RULE_ID_MIN/MAX` to
-  `1000000`-`1999999` (a 7-digit range, provably disjoint from CRS's 6-digit block). See the
-  annotation at `docs/design-notes.md`'s original sketch for the full correction.
-
 ## Validation
 
 - Confirmed `docker exec waf nginx -t` / `nginx -s reload` work directly against the real
@@ -119,38 +115,6 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
 | Endpoint parsing + per-endpoint breach-threshold tracking (`get_breach_status`) | ✅ Done |
 | Operator reset flow for clean test runs | ✅ Done |
 
-## Addendum (2026-09-06): breach tripwire counted the wrong thing
-
-While answering a question about the demo walkthrough's wording, found that `BreachTracker` (and
-`get_breach_status()`) had the "breach" concept backwards relative to the proposal. The proposal
-defines a breach as a *successful WAF bypass* ("analyzes successful WAF bypasses", "endpoint breach
-threshold"); the Sprint 3 implementation counted *blocked* requests instead, because that's the only
-signal available in ModSecurity's error log (`read_waf_logs()`'s source) — a true bypass never
-generates an "Access denied" line there. Consequence: a mutation wave that fully evaded the WAF
-(0 blocks) would never have tripped the threshold, i.e. the exact scenario this project exists to
-catch would have gone undetected.
-
-Fixed in `core/log_parser.py`: `BreachTracker` now also scans the WAF's access log
-(`config.WAF_ACCESS_LOG` — already defined in config and used by `reset_state.py`, just not read for
-this before) for requests carrying `fire.py`'s `_wave_marker` query param with a 2xx response. Only
-the offensive pipeline ever attaches that marker, so its presence on a non-blocked request is a
-reliable "attacker traffic got through" signal without needing real payload re-inspection — the same
-marker-correlation trick `attacker-pipeline/harness/log_reader.py` already relies on.
-
-`get_breach_status()`'s return shape changed: `counts` split into `blocked_counts` (telemetry only)
-and `bypass_counts` (the field `tripped_endpoints` is now actually computed from). `demo_client.py`'s
-`_breach_total` helper (used to size `read_waf_logs()`'s default `lines`) was updated to read
-`blocked_counts`, since that helper is specifically about not truncating the *error*-log tail.
-Verified against the real container: 5 marker-tagged benign (2xx) requests correctly populated
-`bypass_counts` and tripped `tripped_endpoints`, while 3 marker-tagged blocked (403) requests landed
-only in `blocked_counts` and did not.
-
-Full rationale (why block-counting happened, why it's wrong, why the marker-correlation fix is
-sound) is written up in `docs/design-notes.md`'s "Threshold tracking" annotation. The demo script
-(`docs/demo-walkthrough-mcp.md`) was updated to fire marker-tagged requests in its standalone
-quick-fire prereq, since the old plain-XSS-string version relied on the block-counting behavior this
-fix removed.
-
 ## Next Up (Sprint 4)
 
 Per the timeline: Agent Integration & Dry Runs — wire a LangGraph agent to these MCP tools as its
@@ -158,3 +122,5 @@ Per the timeline: Agent Integration & Dry Runs — wire a LangGraph agent to the
 `write_idempotent_rule()` call to make in response. Revisit the streamable-HTTP vs. stdio transport
 choice at that point if the agent framework's MCP client makes one meaningfully easier to wire up
 than the other.
+Down the road, we ideally want to analyze what causes bypasses/if there are any
+trends in the payloads behind them.

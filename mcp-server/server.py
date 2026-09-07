@@ -69,7 +69,7 @@ def test_waf_configuration() -> str:
 @app.tool()
 def write_idempotent_rule(rule_id: int, attack_pattern: str, description: str) -> str:
     """Write (or overwrite) a custom ModSecurity rule in the AI-generated
-    rules file, keyed by `rule_id` (900000-999999). Calling this again with
+    rules file, keyed by `rule_id` (1000000-1999999). Calling this again with
     the same `rule_id` overwrites the existing rule in place rather than
     appending a duplicate - the "Scoped Inclusion" idempotency pattern from
     docs/design-notes.md. `attack_pattern` is a raw regex (matched via @rx)

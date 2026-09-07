@@ -5,19 +5,20 @@ Tracks two separate signals per endpoint (URL path, query string stripped):
 - **Blocked** requests: ModSecurity's error log, i.e. what the WAF stopped.
 - **Bypassed** requests: the WAF's access log, filtered to only requests that
   carry `fire.py`'s `_wave_marker` query param (so this only ever counts
-  traffic the offensive pipeline actually fired, never real user traffic that
-  happens to return 2xx) and that got a 2xx response.
+  traffic the offensive pipeline actually fired, never real user traffic) and
+  that got anything other than a 403 - i.e. the WAF didn't block it, full
+  stop, regardless of what the app did with it afterward.
 
 Only *bypasses* trip config.BREACH_THRESHOLD. This matches the proposal's own
 language ("analyzes successful WAF bypasses", "endpoint breach threshold") -
-an earlier version of this tracker used the blocked count as the tripwire
-instead, which was backwards: a payload the WAF blocks is already handled,
-and a fully-successful mutation wave (0 blocks) would never have tripped the
-threshold at all, even though that's the exact scenario the defensive loop
-exists to catch. See docs/design-notes.md's annotation on "Threshold
-tracking" for the full writeup of that gap. Blocked counts are still tracked
+a payload the WAF blocks is already handled, so a "significantly"
+(>5 bypasses for this project)successful mutation
+wave is exactly the scenario that should trip the
+threshold. See docs/design-notes.md's "Threshold tracking"
+section for the full rationale, including why a bypass means any non-403
+response rather than specifically a 2xx. Blocked counts are still tracked
 and returned - they're useful telemetry (e.g. sizing read_waf_logs()'s
-default `lines`) - they just no longer decide `tripped_endpoints`.
+default `lines`) - they just don't decide `tripped_endpoints`.
 
 Correlating on `_wave_marker` rather than re-inspecting payload content is a
 closed-loop-simulation shortcut: it works because only this project's own
@@ -60,8 +61,23 @@ def _extract_blocked_endpoint(line: str) -> str | None:
 
 def _extract_bypassed_endpoint(line: str) -> str | None:
     """Pull the URL path out of an access-log line if (and only if) it's an
-    attacker-fired request (`_wave_marker` present) that got a 2xx response -
-    i.e. actually reached the app instead of being blocked.
+    attacker-fired request (`_wave_marker` present) that the WAF didn't
+    block - any status other than 403 (Nginx logs ModSecurity's own blocks as
+    403 in the access log too, so excluding it is enough; no need to
+    cross-reference the error log here).
+
+    Deliberately not restricted to 2xx: every wave-marked request is a
+    genuine mutated SQLi/XSS payload from payloads/seeds.py (fire.py is the
+    only thing that ever attaches this marker, and it never fires anything
+    else), so there's no benign traffic to accidentally sweep in here. A 401
+    or 500 on one of these still means the WAF failed to recognize a real
+    attack pattern and let it reach the app - the app then rejecting it for
+    its own unrelated reasons (e.g. wrong credentials, a 500 in some other
+    code path) doesn't change that the WAF missed it. Requiring 2xx would
+    make this metric depend on the app's behavior as much as the WAF's,
+    which is a different thing to measure than WAF efficacy - and RFPR
+    already covers false-positive risk separately, against a disjoint set of
+    genuinely benign requests that never carry this marker.
     """
     if "_wave_marker=" not in line:
         return None
@@ -69,7 +85,7 @@ def _extract_bypassed_endpoint(line: str) -> str | None:
     if not match:
         return None
     path, status = match.groups()
-    if not status.startswith("2"):
+    if status == "403":
         return None
     return path.split("?", 1)[0]
 
