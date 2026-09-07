@@ -1,0 +1,19 @@
+{
+    "folders": [
+        {
+            "name": "capstone",
+            "path": "."
+        },
+        {
+            "name": "attacker-pipeline",
+            "path": "attacker-pipeline"
+        },
+        {
+            "name": "mcp-server",
+            "path": "mcp-server"
+        }
+    ],
+    "settings": {
+        "python.analysis.typeCheckingMode": "standard"
+    }
+}

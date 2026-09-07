@@ -12,6 +12,7 @@ Usage: python demo_client.py  (server.py must already be running)
 
 import asyncio
 import json
+from collections.abc import Sequence
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -42,7 +43,7 @@ _TOOLS = {
 }
 
 
-def _prompt_args(spec: list[tuple[str, type, object]]) -> dict:
+def _prompt_args(spec: Sequence[tuple[str, type, object]]) -> dict:
     """Prompt for each declared arg, casting to the right type. Required args
     (no default) re-prompt on a blank line; optional args fall back to their
     default (or are omitted entirely, for None-default args) on blank input.
@@ -75,7 +76,7 @@ async def _breach_total(session: ClientSession) -> int:
     if status is None:
         text = "".join(getattr(block, "text", "") for block in result.content)
         status = json.loads(text)
-    return sum(status.get("counts", {}).values())
+    return sum(status.get("blocked_counts", {}).values())
 
 
 def _print_result(result) -> None:

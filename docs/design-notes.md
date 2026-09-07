@@ -13,6 +13,21 @@ Inclusion pattern. Kept here as the rationale behind decisions baked into the pr
 - **MVP fallback**: start with a *global* breach count (e.g., any 5 breaches site-wide trips the
   threshold) rather than per-endpoint tracking. Per-endpoint tracking is a Phase 2 refinement — fine
   to document the global-count version as a known Phase 1 limitation.
+  - ⚠️ *Terminology gap, found in Sprint 3, fixed 2026-09-06*: this note (and the proposal itself,
+    e.g. "analyzes successful WAF bypasses") uses "breach" to mean a payload that got *past* the WAF.
+    The original Sprint 3 implementation (`mcp-server/core/log_parser.py`'s `BreachTracker`) instead
+    counted *blocked* requests — the only signal ModSecurity's error log contains, since a true
+    bypass never generates an "Access denied" line there at all. That was a real gap, not just a
+    naming nit: as built, a fully-successful mutation wave (0 blocks) would never have tripped the
+    threshold, which is the exact worst-case scenario this project is about.
+    Fixed by having `BreachTracker` also scan the WAF's access log (`config.WAF_ACCESS_LOG`,
+    already provisioned but unused until now) for requests carrying `fire.py`'s `_wave_marker` query
+    param with a 2xx response — a reliable "this was attacker traffic and it got through" signal
+    since only the offensive pipeline ever attaches that marker. `get_breach_status()` now returns
+    separate `blocked_counts` (telemetry only) and `bypass_counts` (drives `tripped_endpoints`),
+    matching the proposal's language. See `docs/demo-walkthrough-mcp.md`'s terminology note for the
+    demo-facing version of this, and `mcp-server/docs/Sprint3_Summary.md`'s addendum for the fix
+    writeup.
 
 ## Idempotency: the "Scoped Inclusion" pattern
 

@@ -44,11 +44,13 @@ def read_waf_logs(lines: int = 50) -> str:
 
 @app.tool()
 def get_breach_status(endpoint: str | None = None) -> dict:
-    """Return per-endpoint breach counts (URL path, query string stripped)
-    accumulated since this server started, plus which endpoints have reached
-    config.BREACH_THRESHOLD. Pass `endpoint` to restrict the result to one
-    specific path (e.g. "/rest/user/login"); omit it to see every endpoint
-    that's been breached so far.
+    """Return per-endpoint blocked_counts and bypass_counts (URL path, query
+    string stripped) accumulated since this server started, plus which
+    endpoints have reached config.BREACH_THRESHOLD on bypass_counts -
+    blocked_counts is telemetry only and never trips the threshold, since a
+    blocked payload is already handled and isn't the gap a new rule needs to
+    close. Pass `endpoint` to restrict the result to one specific path (e.g.
+    "/rest/user/login"); omit it to see every endpoint tracked so far.
     """
     return _breach_tracker.status(endpoint)
 

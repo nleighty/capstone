@@ -35,7 +35,7 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   imported, since this is core/production code and that module is the test-harness layer).
 - **`core/rule_writer.py`** — builds and idempotently writes the `SecRule` line; validates
   `rule_id` falls in the reserved 1000000-1999999 custom range (see "Issues Encountered" below —
-  this was originally 900000-999999 and got corrected the day after this sprint wrapped).
+  this was originally 900000-999999 and got corrected).
 - **`core/waf_control.py`** — thin `docker exec` wrappers, confirmed against the real container
   before being wired in.
 - **`reset_state.py`** — operator-only script (deliberately *not* an MCP tool - see "Design
@@ -80,8 +80,7 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   delete-and-recreate the files (which would silently break logging, since nginx holds the old
   file open and a replaced file wouldn't receive further writes).
 - **The custom rule ID range (900000-999999) actually collided with CRS's own reserved range**
-  (found 2026-08-31, one day after this sprint wrapped, while walking through the code with the
-  advisor-facing write-up). `docs/design-notes.md`'s original sketch had the convention backwards -
+  `docs/design-notes.md`'s original sketch had the convention backwards -
   that whole block is reserved *by* CRS for its own rules (confirmed against the real ruleset and
   CRS's own `docs/CHANGES.md`), not free for custom ones. An AI-picked `rule_id` could have silently
   collided with a real CRS rule (e.g. `949110`). Fixed by moving `config.CUSTOM_RULE_ID_MIN/MAX` to
@@ -119,6 +118,38 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
 | MCP server exposing `read_waf_logs`, `test_waf_configuration`, `write_idempotent_rule`, `reload_waf` | ✅ Done |
 | Endpoint parsing + per-endpoint breach-threshold tracking (`get_breach_status`) | ✅ Done |
 | Operator reset flow for clean test runs | ✅ Done |
+
+## Addendum (2026-09-06): breach tripwire counted the wrong thing
+
+While answering a question about the demo walkthrough's wording, found that `BreachTracker` (and
+`get_breach_status()`) had the "breach" concept backwards relative to the proposal. The proposal
+defines a breach as a *successful WAF bypass* ("analyzes successful WAF bypasses", "endpoint breach
+threshold"); the Sprint 3 implementation counted *blocked* requests instead, because that's the only
+signal available in ModSecurity's error log (`read_waf_logs()`'s source) — a true bypass never
+generates an "Access denied" line there. Consequence: a mutation wave that fully evaded the WAF
+(0 blocks) would never have tripped the threshold, i.e. the exact scenario this project exists to
+catch would have gone undetected.
+
+Fixed in `core/log_parser.py`: `BreachTracker` now also scans the WAF's access log
+(`config.WAF_ACCESS_LOG` — already defined in config and used by `reset_state.py`, just not read for
+this before) for requests carrying `fire.py`'s `_wave_marker` query param with a 2xx response. Only
+the offensive pipeline ever attaches that marker, so its presence on a non-blocked request is a
+reliable "attacker traffic got through" signal without needing real payload re-inspection — the same
+marker-correlation trick `attacker-pipeline/harness/log_reader.py` already relies on.
+
+`get_breach_status()`'s return shape changed: `counts` split into `blocked_counts` (telemetry only)
+and `bypass_counts` (the field `tripped_endpoints` is now actually computed from). `demo_client.py`'s
+`_breach_total` helper (used to size `read_waf_logs()`'s default `lines`) was updated to read
+`blocked_counts`, since that helper is specifically about not truncating the *error*-log tail.
+Verified against the real container: 5 marker-tagged benign (2xx) requests correctly populated
+`bypass_counts` and tripped `tripped_endpoints`, while 3 marker-tagged blocked (403) requests landed
+only in `blocked_counts` and did not.
+
+Full rationale (why block-counting happened, why it's wrong, why the marker-correlation fix is
+sound) is written up in `docs/design-notes.md`'s "Threshold tracking" annotation. The demo script
+(`docs/demo-walkthrough-mcp.md`) was updated to fire marker-tagged requests in its standalone
+quick-fire prereq, since the old plain-XSS-string version relied on the block-counting behavior this
+fix removed.
 
 ## Next Up (Sprint 4)
 

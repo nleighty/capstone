@@ -35,7 +35,8 @@ Manual known-payload sanity check (expect `403`):
 curl -s -o /dev/null -w "status: %{http_code}\n" "http://localhost:8080/rest/products/search?q=<script>alert(1)</script>"
 ```
 Clear the log files (fresh start — e.g. before a rehearsal, so `tail -f` output isn't cluttered
-with old runs; requires `sudo` since the container writes these as root via the bind mount):
+with old runs; requires `sudo` since the container writes these as root via the bind mount).
+Running `mcp-server/reset_state.py` also works for this, and is the preferred method.:
 ```bash
 sudo truncate -s 0 /home/nicle/capstone/waf-defense/logs/access.log /home/nicle/capstone/waf-defense/logs/error.log
 ```

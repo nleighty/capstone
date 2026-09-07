@@ -35,15 +35,27 @@ requests in it. Pick based on what you're demoing:
 ```bash
 for i in 1 2 3 4 5; do
   curl -s -o /dev/null -w "status: %{http_code}\n" \
-    "http://localhost:8080/rest/products/search?q=<script>alert($i)</script>"
-done
-```
+      "http://localhost:8080/rest/products/search?q=demo$i&_wave_marker=standalone-demo-$i"
+      done
+      ```
 
-Five requests against the same endpoint, comfortably past `BREACH_THRESHOLD` (default 5). This
-trips CRS's default `REQUEST-949-BLOCKING-EVALUATION` catch-all rule on a textbook XSS payload -
-fine for exercising the MCP mechanism, just not a demonstration of the offensive pipeline's actual
-value (that's what the combined option above is for).
+      Five requests against the same endpoint, tagged with `fire.py`'s `_wave_marker` query param so
+      `get_breach_status()` recognizes them as attacker-pipeline traffic (see the terminology note below).
+      Each one is a benign search term, so all five return `200` - that's the point: five *bypasses*
+      (`count >= BREACH_THRESHOLD`, default 5) is what actually trips the tripwire now. Fine for exercising
+      the MCP mechanism; not a demonstration of the offensive pipeline's actual mutation/bypass behavior
+      (that's what the combined option above is for, and where the marker is attached to genuinely
+      malicious, LLM-mutated payloads instead of a hand-picked benign string).
 
+      **Terminology note:** `get_breach_status()`/`BREACH_THRESHOLD` count *bypassed* requests - ones that
+      carry `_wave_marker` (so they're known attacker-pipeline traffic, never real user traffic) and got a
+      `2xx` response - matching the proposal's "successful WAF bypasses" / "endpoint breach threshold"
+      language. *Blocked* requests (ModSecurity `Access denied` lines) are tracked too, as
+      `blocked_counts`, but are informational only and never trip the threshold - a blocked payload is
+      already handled; it's not the gap a new rule needs to close. An earlier version of this tracker had
+      it backwards (block-count as the tripwire); see the annotation in `docs/design-notes.md`'s
+      "Threshold tracking" section for the full history.
+      
 ---
 
 ## Before the meeting — rehearse this once, alone tonight
@@ -89,9 +101,10 @@ if combining demos.
 
 Start `demo_client.py`, pick option `2`, leave `endpoint` blank. *Say:* "This is the per-endpoint
 breach tracker - not one of the proposal's original four tools, called out separately in the
-Sprint 3 timeline as its own deliverable. It scans the WAF log incrementally and reports which
-endpoints have crossed the threshold." Point at `/rest/products/search` showing up with a count at
-or above 5 and appearing in `tripped_endpoints`.
+Sprint 3 timeline as its own deliverable. It scans both WAF logs incrementally and reports which
+endpoints have crossed the threshold on actual bypasses, not just blocked noise." Point at
+`/rest/products/search` showing up in `bypass_counts` at or above 5 and appearing in
+`tripped_endpoints`; `blocked_counts` is shown alongside as context but doesn't drive the trip.
 
 ### Step 4 — `read_waf_logs()`: what actually got logged
 
