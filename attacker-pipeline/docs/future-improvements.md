@@ -15,3 +15,5 @@ pure "how to run what already exists" reference rather than mixing in a backlog.
 - **Print `config.py`'s current defaults without opening the file** — e.g. folded into `--help`,
   so `python run.py --help` shows the actual `WAVE_SIZE`/`NUM_WAVES`/`WAVE_PAUSE_SECONDS` values
   currently in effect, not just the flag descriptions.
+
+## Investigate the question: What causes bypasses/what are the trends/patterns in the payloads behind them?

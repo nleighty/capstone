@@ -122,5 +122,7 @@ Per the timeline: Agent Integration & Dry Runs — wire a LangGraph agent to the
 `write_idempotent_rule()` call to make in response. Revisit the streamable-HTTP vs. stdio transport
 choice at that point if the agent framework's MCP client makes one meaningfully easier to wire up
 than the other.
+(See OneNote regarding the below:)
 Down the road, we ideally want to analyze what causes bypasses/if there are any
 trends in the payloads behind them.
+Also down the road, we want to script task sequences to logically compartmentalize them for easier execution of the system.
