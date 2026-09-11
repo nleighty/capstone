@@ -8,10 +8,13 @@ every command below is one you type.
 ## Scope — set this expectation up front with the advisor
 
 This demo shows the **offensive side only** (proposal timeline items 1-2). There is no defensive
-agent yet (that's Sprint 3-4 — the MCP server and LangGraph agent don't exist yet), so every payload
-you fire either gets blocked by the *existing* default ModSecurity/CRS ruleset or bypasses it — you
-won't see the WAF learn or adapt during the demo. That's expected, not a gap: this demo is showing
-"the attack half of the loop works," not the full self-healing story yet.
+agent yet (that's Sprint 4 — the LangGraph agent doesn't exist yet), so every payload you fire
+either gets blocked by the *existing* default ModSecurity/CRS ruleset or bypasses it — you won't see
+the WAF learn or adapt during this demo. That's expected, not a gap: this demo is showing "the
+attack half of the loop works," not the full self-healing story yet.
+
+**Related:** `docs/demo-walkthrough-mcp.md` demos Sprint 3's defensive MCP server (log reading,
+breach tracking, rule writing) standalone or combined with a wave fired from this script.
 
 ## Metrics note — this run does not touch the official baseline data
 
@@ -94,7 +97,7 @@ In the first pane:
 ```bash
 cd ~/capstone/attacker-pipeline
 source .venv/bin/activate
-python run.py --waves 1 --label demo
+python3 run.py --waves 1 --label demo
 ```
 This runs one full wave (all 16 seeds, ~50 mutated payloads) against the live WAF — takes a couple
 of minutes, dominated by the 16 real LLM calls (one per seed). *Say, while it runs:* "Each of these
@@ -117,10 +120,10 @@ signature-based ruleset just... didn't recognize it."
 ### Step 7 — Wrap-up talking points
 
 - What's built: Sprint 1 (WAF+target+logging), Sprint 2 (this pipeline — LLM mutation, firing,
-  wave orchestration, block/bypass + rule-ID metrics).
-- What's next: Sprint 3 (MCP server exposing `read_waf_logs`/`write_idempotent_rule`/etc.),
-  Sprint 4 (LangGraph defensive agent wired to those tools), Sprint 5 (multi-wave loops measuring
-  MTTM/Bypass Decay Rate/RGI/RFPR against a WAF that's actually adapting).
+  wave orchestration, block/bypass + rule-ID metrics), Sprint 3 (the defensive MCP server exposing
+  `read_waf_logs`/`write_idempotent_rule`/etc. — see `docs/demo-walkthrough-mcp.md` for that demo).
+- What's next: Sprint 4 (LangGraph defensive agent wired to those tools), Sprint 5 (multi-wave loops
+  measuring MTTM/Bypass Decay Rate/RGI/RFPR against a WAF that's actually adapting).
 - Today's numbers are illustrative (demo-labeled); the actual Sprint 2 baseline — 250 payloads
   across 5 waves, 66% blocked / 34% bypassed — is already recorded and written up in
   `attacker-pipeline/docs/Sprint2_Summary.md`.

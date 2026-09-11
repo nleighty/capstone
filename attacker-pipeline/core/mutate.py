@@ -7,6 +7,7 @@ variants. Has no concept of "wave size" or metrics — that's the harness's job.
 import json
 import re
 
+import httpx
 import ollama
 
 import config
@@ -24,7 +25,21 @@ _SYSTEM_PROMPT = (
 
 _ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
-_client = ollama.Client(host=config.OLLAMA_HOST)
+# A request timeout guards against llama3 dropping into a degenerate
+# repetition loop and never emitting an end-of-sequence token — observed
+# during Sprint 2/3 testing to run past 25 minutes and 9000+ tokens for what
+# should be a short JSON array before something on our end finally kills it.
+# 90s comfortably covers a normal ~200-800 token response even on CPU/low-GPU
+# hardware, while still failing fast instead of hanging the whole wave loop.
+_GENERATE_TIMEOUT_SECONDS = 90
+
+# Upper bound on response length. n variants of a short XSS/SQLi payload
+# should top out in the low hundreds of tokens; this is a generous ceiling
+# that still turns a runaway generation into a fast failure (caught below)
+# instead of an unbounded hang.
+_MAX_PREDICT_TOKENS = 1024
+
+_client = ollama.Client(host=config.OLLAMA_HOST, timeout=_GENERATE_TIMEOUT_SECONDS)
 
 
 def _normalize_json_text(text: str) -> str:
@@ -79,6 +94,25 @@ def _parse_variants(text: str) -> list[str]:
     return variants
 
 
+def _safe_generate(prompt: str) -> str:
+    """Call the model with the token cap applied, treating a timeout the same
+    as any other uncooperative response (empty string) rather than crashing
+    the wave loop — a hung/looping generation should cost one wasted attempt,
+    not the whole run.
+    """
+    try:
+        response = _client.generate(
+            model=config.OLLAMA_MODEL,
+            prompt=prompt,
+            stream=False,
+            options={"num_predict": _MAX_PREDICT_TOKENS},
+        )
+        return response["response"]
+    except httpx.TimeoutException:
+        print(f"[mutate] WARNING: generate() timed out after {_GENERATE_TIMEOUT_SECONDS}s, treating as empty response")
+        return ""
+
+
 def generate_variants(seed_payload: str, attack_type: str, n: int) -> list[str]:
     """Ask llama3 for up to `n` obfuscated variants of one seed payload.
 
@@ -94,8 +128,7 @@ def generate_variants(seed_payload: str, attack_type: str, n: int) -> list[str]:
         f"seed_payload: {seed_payload}"
     )
 
-    response = _client.generate(model=config.OLLAMA_MODEL, prompt=prompt, stream=False)
-    variants = _parse_variants(response["response"])
+    variants = _parse_variants(_safe_generate(prompt))
 
     # Case-insensitive dedup: the model sometimes repeats a variant with only
     # a capitalization difference, which isn't a meaningfully distinct mutation.
@@ -111,8 +144,7 @@ def generate_variants(seed_payload: str, attack_type: str, n: int) -> list[str]:
     # occasional bad response without risking an unbounded number of calls
     # to a local model that's already the slowest part of the wave loop.
     if len(deduped) < n:
-        response = _client.generate(model=config.OLLAMA_MODEL, prompt=prompt, stream=False)
-        retry_variants = _parse_variants(response["response"])
+        retry_variants = _parse_variants(_safe_generate(prompt))
         for v in retry_variants:
             key = v.lower()
             if key not in seen:

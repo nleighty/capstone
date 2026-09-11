@@ -35,7 +35,8 @@ Manual known-payload sanity check (expect `403`):
 curl -s -o /dev/null -w "status: %{http_code}\n" "http://localhost:8080/rest/products/search?q=<script>alert(1)</script>"
 ```
 Clear the log files (fresh start — e.g. before a rehearsal, so `tail -f` output isn't cluttered
-with old runs; requires `sudo` since the container writes these as root via the bind mount):
+with old runs; requires `sudo` since the container writes these as root via the bind mount).
+Running `mcp-server/reset_state.py` also works for this, and is the preferred method.:
 ```bash
 sudo truncate -s 0 /home/nicle/capstone/waf-defense/logs/access.log /home/nicle/capstone/waf-defense/logs/error.log
 ```
@@ -76,7 +77,7 @@ curl -s http://localhost:11434/api/generate -d '{"model":"llama3","prompt":"hell
 ```bash
 cd ~/capstone/attacker-pipeline
 source .venv/bin/activate
-python run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT]
+python3 run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT]
 ```
 
 | Flag | Default | Use |
@@ -87,11 +88,51 @@ python run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT]
 | `--label` | none | Tags the output filename (`run_<label>_<timestamp>.csv`) — use for demo/rehearsal runs so they're never mistaken for real baseline data |
 
 Common invocations:
-- Real baseline capture (defaults): `python run.py`
-- Quick smoke test: `python run.py --waves 1 --wave-size 5 --pause 0`
-- Advisor demo: `python run.py --waves 1 --label demo`
+- Real baseline capture (defaults): `python3 run.py`
+- Quick smoke test: `python3 run.py --waves 1 --wave-size 5 --pause 0`
+- Advisor demo: `python3 run.py --waves 1 --label demo`
 
 For proposed-but-not-yet-built CLI flags, see `attacker-pipeline/docs/future-improvements.md`.
+
+## Running the MCP server
+
+Standalone service, listens on `http://127.0.0.1:8000/mcp` (streamable-HTTP) until stopped:
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python3 server.py
+```
+
+Exposes 5 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `test_waf_configuration`,
+`write_idempotent_rule`, `reload_waf`. See `mcp-server/docs/Sprint3_Summary.md` for what each does.
+
+Resetting between test runs (clears `ai_generated_rules.conf`, truncates the WAF log files —
+prompts for `sudo`, run from a real terminal, not scripted/non-interactively):
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python3 reset_state.py
+```
+After running it, restart the server (its in-memory breach tally only resets on restart) and
+reload the WAF so it picks up the now-empty rules file:
+```bash
+docker exec waf nginx -s reload
+```
+
+### Demoing the tools by hand (`demo_client.py`)
+
+Standing in for the not-yet-built Sprint 4 agent: a small interactive MCP client with a numbered
+menu over the five tools. Requires `server.py` already running (above) in another terminal:
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python3 demo_client.py
+```
+Pick a tool by number, fill in the prompted arguments (blank keeps the default where one exists),
+`q` to quit. For `read_waf_logs`, it calls `get_breach_status()` first and defaults `lines` to the
+current total blocked-request count (floor of 50) instead of a fixed guess, so it won't silently
+miss lines from a larger-than-expected wave. See `docs/demo-walkthrough-mcp.md` for a full
+rehearsable script built around this client.
 
 ## Metrics output
 

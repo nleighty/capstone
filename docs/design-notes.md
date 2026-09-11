@@ -13,6 +13,25 @@ Inclusion pattern. Kept here as the rationale behind decisions baked into the pr
 - **MVP fallback**: start with a *global* breach count (e.g., any 5 breaches site-wide trips the
   threshold) rather than per-endpoint tracking. Per-endpoint tracking is a Phase 2 refinement — fine
   to document the global-count version as a known Phase 1 limitation.
+- **"Breach" means a payload got *past* the WAF, not that the WAF blocked something.** Matching the
+  proposal's own language ("analyzes successful WAF bypasses", "endpoint breach threshold"),
+  `BreachTracker` (`mcp-server/core/log_parser.py`) tracks two separate signals per endpoint:
+  *blocked* requests (ModSecurity's error log — telemetry only) and *bypassed* requests (the WAF's
+  access log, filtered to requests carrying `fire.py`'s `_wave_marker` query param — reliably
+  attacker traffic, since only the offensive pipeline ever attaches that marker). Only bypasses
+  drive `tripped_endpoints`; a blocked payload is already handled, so it isn't the gap a new rule
+  needs to close.
+- **A bypass is any non-`403` response, not specifically a `2xx`.** Nginx logs a WAF block as `403`
+  in the access log too, so excluding just that one status is enough to isolate "the WAF didn't
+  catch this" — no error-log cross-reference needed. This is deliberately not narrowed to `2xx`:
+  every `_wave_marker`-tagged request is already a genuine mutated SQLi/XSS payload from
+  `payloads/seeds.py` (never benign traffic), so a `401`/`500` from the app is just as much a WAF
+  miss as a `200` is — the app rejecting the payload for its own unrelated reasons (wrong
+  credentials, an unrelated server error) doesn't mean the WAF detected it. This keeps the bypass
+  signal scoped to WAF efficacy specifically, independent of the app's own behavior, and it makes
+  `BreachTracker`'s bypass count match the attacker-pipeline harness's own bypass metric exactly.
+  RFPR is the correct place to catch false-positive risk, since it tests against a disjoint,
+  genuinely benign request set that never carries `_wave_marker`.
 
 ## Idempotency: the "Scoped Inclusion" pattern
 
@@ -22,13 +41,19 @@ duplicate/colliding rules pile up, and eventually Nginx refuses to reload.
 Solution (this is what Sprint 1's rule-injection target implements):
 1. Don't let the agent touch the main `modsecurity.conf`. Instead, maintain a separate file,
    `ai_generated_rules.conf`, included from the main config via a single `Include` directive.
-2. Every custom rule gets a unique numeric ID. ModSecurity convention: custom rule IDs in the
-   `900000`–`999999` range.
+2. Every custom rule gets a unique numeric ID, reserved in the `1000000`–`1999999` range. CRS
+   itself reserves the `900000`–`999999` block for its own rules (confirmed against the real
+   ruleset shipped in `owasp/modsecurity-crs` - rule prefixes 901/905/911/913/920-922/930-934/
+   941-944/949/950-956/959/980 all fall in that block - and CRS's own `docs/CHANGES.md`: "rule IDs
+   to start from CRS reserved range: 900000"), so custom rules need a disjoint range: a 7-digit
+   block can't collide with CRS's 6-digit one, ruling out an AI-picked `rule_id` ever silently
+   colliding with a real CRS rule (e.g. `949110`, the anomaly-scoring rule referenced throughout
+   `waf-defense/logs/error.log`).
 3. Force the LLM's output into a strict schema tied to a stable ID per attack vector, e.g.:
    ```json
    {
      "target_endpoint": "/api/login",
-     "rule_id": 900001,
+     "rule_id": 1000001,
      "rule_logic": "SecRule REQUEST_COOKIES:session ..."
    }
    ```
@@ -112,6 +137,13 @@ def reload_waf() -> str:
 (`test_waf_configuration()` — the fourth tool in the proposal's set — isn't sketched here; it's a
 validation step, likely `nginx -t` or equivalent, run before `reload_waf()` to catch a bad rule
 before it takes down the WAF.)
+
+> ⚠️ **Correction (Sprint 3):** the sketch above targets `REQUEST_COOKIES|REQUEST_PARAMETERS`, but
+> `REQUEST_PARAMETERS` isn't a real ModSecurity variable — the actual collection is `ARGS`. Caught by
+> `test_waf_configuration()` rejecting the generated rule the first time it was tried against the
+> real WAF; see `mcp-server/docs/debug-notes-sprint3-rule-syntax.md`. The implemented version in
+> `mcp-server/core/rule_writer.py` uses `REQUEST_COOKIES|ARGS` with an explicit `@rx` operator.
+> Left the original text below unedited as the historical record of the sketch.
 
 Names here match the proposal's finalized tool set: `read_waf_logs()`, `test_waf_configuration()`,
 `write_idempotent_rule()`, `reload_waf()`. This is still just a conceptual sketch, not
