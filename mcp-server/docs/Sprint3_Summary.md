@@ -121,7 +121,7 @@ Per the timeline: Agent Integration & Dry Runs — wire a LangGraph agent to the
 "brain," deciding when `get_breach_status()` indicates a tripped endpoint and what
 `write_idempotent_rule()` call to make in response. Revisit the streamable-HTTP vs. stdio transport
 choice at that point if the agent framework's MCP client makes one meaningfully easier to wire up
-than the other.
+than the other. Investigate Claude use on this (instead of Ollama, as alluded to in the proposal).
 (See OneNote regarding the below:)
 Down the road, we ideally want to analyze what causes bypasses/if there are any
 trends in the payloads behind them.
