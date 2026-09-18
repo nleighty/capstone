@@ -34,7 +34,7 @@ LLM since cloud LLMs guardrail against generating exploits).
 2. Attacker Pipeline & Test Harness — Ollama payload mutation, test orchestrator ✅ **Sprint 2 done**
 3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking ✅ **Sprint 3 done**
 4. Agent Integration & Dry Runs — LangGraph agent wired to MCP tools, idempotent rule IDs
-   🔶 **built, pending a live Docker/WAF dry run** — see `defensive-agent/docs/Sprint4_Summary.md`
+   ✅ **Sprint 4 done** — see `defensive-agent/docs/Sprint4_Summary.md`
 5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
 6. Report finalization, then presentation prep
 

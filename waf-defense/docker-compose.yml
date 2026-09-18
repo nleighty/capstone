@@ -15,6 +15,20 @@ services:
       PARANOIA: "1"
       ACCESSLOG: "/var/log/waf-logs/access.log"
       ERRORLOG: "/var/log/waf-logs/error.log"
+      # ModSecurity's own audit log (JSON, one transaction per line) - unlike
+      # the plain access/error logs, this captures the actual matched request
+      # data (e.g. which JSON field held an injected payload and what the
+      # payload was), which is the only way to see a POST attack's real
+      # content (nginx's access log format has no body field). Redirected
+      # here from the image's default /dev/stdout so mcp-server can read it
+      # via the same bind mount as the other logs.
+      MODSEC_AUDIT_LOG: "/var/log/waf-logs/modsec_audit.log"
+      # Default RelevantOnly only logs 4xx(-except-404)/5xx transactions,
+      # which would silently miss a genuinely successful bypass (200) - e.g.
+      # the XSS/SQLi hits on /rest/products/search are all 200. This is a
+      # small local testbed, not production traffic, so logging everything
+      # is cheap and closes that gap.
+      MODSEC_AUDIT_ENGINE: "On"
     volumes:
       - ./modsec-rules/ai_generated_rules.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
       - ./logs:/var/log/waf-logs

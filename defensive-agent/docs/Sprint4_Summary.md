@@ -1,7 +1,7 @@
 # Sprint 4 Summary — Agent Integration & Dry Runs
 
 **Project:** An Adaptive Defense Framework Against GenAI-Driven Web Payload Polymorphism Using MCP
-**Sprint Dates:** work completed 2026-09-17
+**Sprint Dates:** work completed 2026-09-17, live Docker verification completed 2026-09-18
 **Student:** Nic Leighty
 
 ## Objective
@@ -111,9 +111,31 @@ correction note for the pointer back.
 - **Docker wasn't reachable from the development session used to build this** (WSL 2 distro without
   Docker Desktop's WSL integration active for that session) — this blocked two of the five MCP tools
   end-to-end (`test_waf_configuration`, `reload_waf`, both `docker exec waf ...`) and blocked firing
-  a real `attacker-pipeline` wave against a live WAF on port 8080. See "Validation" below for exactly
-  what was and wasn't covered as a result, and what still needs to be run in an environment with
-  Docker access.
+  a real `attacker-pipeline` wave against a live WAF on port 8080. Resolved 2026-09-18 in a session
+  with real Docker access — see "Validation" below.
+- **`BreachTracker` silently skipped an entire real wave** (found 2026-09-18): a fresh wave was fired
+  before `server.py` was (re)started, and a fresh tracker with no checkpoint starts at *end-of-file*
+  by design (so a restart doesn't retroactively count old traffic) — meaning it started scanning
+  from the very end of a file that already contained the whole wave, and silently counted nothing.
+  Not a code bug - correct by-design behavior for its intended case, but the symptom (`get_breach_status()`
+  reporting all-zero) was indistinguishable from "nothing tripped" without digging into file mtimes
+  and process start times. Fixed by adding a startup print in `_initial_offset()` (`core/log_parser.py`)
+  that names the log's starting offset and current size, with an explicit warning when a fresh start
+  lands on a non-empty file. Also restructured `docs/common-commands.md` so the MCP server section
+  comes before the attacker-pipeline section (it previously read as license to fire a wave first).
+- **For POST-body attacks specifically, neither log tool exposes the actual injected payload** (found
+  2026-09-18, live testing against `/rest/user/login`'s sqli seeds): `sample_bypasses` reads the
+  access log, which only logs the request line (`_wave_marker` is a query param, visible even on a
+  POST) - the actual injected value lives in the JSON body, which nginx's access log never records.
+  The error log's `[data ""]` field was also empty for these blocked attempts. This is real for POST
+  targets (`/rest/user/login`) but not GET targets (`/rest/products/search`'s sqli/xss ride in the
+  query string, which *is* logged) - the agent wrote a working rule for `/rest/user/login` from
+  generic SQLi domain knowledge, not from evidence of the actual mutations, and it happened to work
+  against the tested patterns, but this is a real gap against this project's own "identifies the
+  mutation pattern" goal for POST endpoints. Not fixed this sprint - flagged for Sprint 5 (see "Next
+  Up"); a fix would need CRS's request-body logging enabled (e.g. `SecAuditLogParts` including body
+  parts, or a ModSecurity rule that logs `REQUEST_BODY` on match) since nginx's own access log format
+  has no body field to begin with.
 
 ## Validation
 
@@ -140,37 +162,44 @@ correction note for the pointer back.
   that ID afterward (`grep -c` → 1) — overwritten, not duplicated. This is this sprint's explicitly
   stated deliverable, and it holds.
 
-**What was NOT verified (needs a session with Docker access to `waf` and `juice-shop`):**
+**Completed 2026-09-18, with real Docker access, a real `attacker-pipeline` wave, and a real WAF:**
 
-- `test_waf_configuration()` / `reload_waf()` actually succeeding against a real WAF container.
-- A real `attacker-pipeline` wave (`python3 run.py --waves 1 --label dry-run-demo`) firing against
-  the live WAF on `localhost:8080`, rather than hand-injected synthetic log lines.
-- Confirming the reload takes effect: re-firing a request matching the agent's chosen regex and
-  seeing `403` where it was previously non-403, for both families.
+- Fired a real wave; `/rest/user/login` (sqli) and `/rest/products/search` (sqli+xss, below
+  threshold) both registered correctly in `get_breach_status()` once the offset issue above was
+  fixed.
+- Ran `agent.py` for real against `/rest/user/login`. It wrote a rule, called
+  `test_waf_configuration` (real `docker exec waf nginx -t`, succeeded), and called `reload_waf`
+  (real `nginx -s reload`) - all end-to-end, no synthetic substitution.
+- Confirmed the rule is genuinely live by firing real requests, not by inspecting config dumps
+  (`nginx -T` doesn't reflect ModSecurity's own `Include` chain - a dead end, not a real check):
+  a benign wrong-password login still returned `401` (no false positive), and both a generic
+  `' OR 1=1--` tautology and the literal `sqli-08` seed payload returned `403`.
 
-**Next step for whoever picks this up**: run `docs/common-commands.md`'s "Running the defensive
-agent" section for real, with the WAF stack up (`docker compose -f waf-defense/docker-compose.yml
-up -d`) and a real attacker-pipeline wave fired first. Everything downstream of
-`get_breach_status()` and `write_idempotent_rule()` is already proven correct against real data;
-only the two Docker-dependent calls remain to actually exercise against a live container.
+**Not yet re-verified end-to-end this round**: the `/rest/products/search` mixed-family case
+specifically (below threshold on this run, so it didn't fire) - the mechanism was already proven
+against synthetic mixed-family data on 2026-09-17 and there's no reason to expect it behaves
+differently live, but it hasn't been watched happen against a real wave yet.
 
-## Status: Sprint 4 Built, Pending Live Docker Verification
+## Status: Sprint 4 Complete
 
 | Deliverable | Status |
 |---|---|
-| LangGraph agent wired to the 5 MCP tools | ✅ Done, verified live (see Validation) |
+| LangGraph agent wired to the 5 MCP tools | ✅ Done, verified live end-to-end |
 | Structured JSON tool outputs | ✅ Done — native Claude tool-use, no bespoke layer needed |
 | Static rule IDs for idempotency | ✅ Done, verified live — same ID reused, no duplicate rule lines |
-| Bypass-visibility gap in `get_breach_status()` | ✅ Found and fixed this sprint |
+| Bypass-visibility gap in `get_breach_status()` | ✅ Found and fixed |
 | Family-aware bypass sampling | ✅ Done, unit- and live-tested |
-| `test_waf_configuration()` / `reload_waf()` against a real WAF container | ⬜ Blocked on Docker access in the dev session — needs a real run |
-| Real `attacker-pipeline` wave as the traffic source (vs. synthetic injection) | ⬜ Needs a real run |
+| `test_waf_configuration()` / `reload_waf()` against a real WAF container | ✅ Verified live 2026-09-18 |
+| Real `attacker-pipeline` wave as the traffic source | ✅ Verified live 2026-09-18 |
+| Rule confirmed actually blocking, benign traffic unaffected | ✅ Verified live via direct curl tests |
+| POST-body payload visibility for `sample_bypasses` | ⬜ Known gap, not fixed this sprint - see Issues Encountered |
 
 ## Next Up (Sprint 5)
 
 Per the timeline: Automated Testing — multi-wave attack loops, MTTM/α/RGI/RFPR metrics collection.
-Also worth revisiting at that point, now that a real polling/automation loop is in scope:
+Also worth addressing at that point:
+- **POST-body payload visibility** (see Issues Encountered) - needed before RGI can mean much for
+  POST endpoints, since right now the agent can't actually see what it's generalizing from there.
 - Whether an outer `StateGraph` is now warranted (this sprint deliberately deferred that).
 - Code-enforced test→reload ordering as a backstop, rather than relying solely on the system
   prompt's instructions — fine for a human-watched dry run, a real gap for unattended automation.
-- Complete the Docker-dependent verification left open above, as the first step of Sprint 5's setup.

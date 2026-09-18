@@ -48,6 +48,20 @@ receive more than one attack family in the same wave (e.g.
 `attacker-pipeline/payloads/seeds.py`) - a flat per-endpoint sample cap would
 let whichever family bypasses later in the wave silently evict every example
 of the other family before the agent ever sees them.
+
+A GET attack's payload is visible in the access-log line itself (it's in the
+query string), but a POST attack's payload is not - nginx's access log has no
+body field, and neither does its error log (confirmed empirically: the
+`[data ""]` field is empty for POST-body SQLi blocks). The only place the
+actual injected value shows up at all is ModSecurity's own JSON audit log
+(`config.WAF_AUDIT_LOG`, enabled via docker-compose.yml's MODSEC_AUDIT_LOG/
+MODSEC_AUDIT_ENGINE env vars), which includes a `messages[].details.data`
+field like `"Matched Data: ... found within ARGS:json.email: ' OR 1=1--"`
+whenever a CRS rule's signature matched - straight from ModSecurity's own
+detection engine, not our own guesswork. This module additionally scans that
+log and feeds matching entries into the same per-(endpoint, family) sample
+buckets, purely as enrichment - bypass_counts stays sourced from the access
+log alone, unchanged.
 """
 
 import json
@@ -104,6 +118,40 @@ def _extract_blocked_endpoint(line: str) -> str | None:
     if not match:
         return None
     return match.group(1).split("?", 1)[0]
+
+
+def _extract_audit_sample(line: str) -> tuple[str, str, str] | None:
+    """Parse one line of ModSecurity's JSON audit log (one transaction per
+    line - "Serial" format) and return (endpoint, family, sample) for a
+    bypass, or None if this line isn't a wave-marked bypass (or doesn't
+    parse - a partially-written last line at scan time, for instance).
+
+    Prefers the actual matched payload data ModSecurity itself extracted
+    (e.g. "Matched Data: ... found within ARGS:json.email: ' OR 1=1--") over
+    the bare URI, since that's the only place a POST body's content exists
+    at all. Falls back to the URI alone when no rule logged matched data
+    (e.g. a payload that evaded every CRS rule outright, or a GET request
+    where the URI already carries the payload).
+    """
+    try:
+        transaction = json.loads(line)["transaction"]
+        uri = transaction["request"]["uri"]
+        status = transaction["response"]["http_code"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+    if "_wave_marker=" not in uri or status == 403:
+        return None
+
+    endpoint = uri.split("?", 1)[0]
+    family = _extract_family(uri)
+    matched_data = [
+        m["details"]["data"]
+        for m in transaction.get("messages", [])
+        if m.get("details", {}).get("data")
+    ]
+    sample = f"{uri} - {'; '.join(matched_data)}" if matched_data else uri
+    return endpoint, family, sample
 
 
 def _extract_bypassed_endpoint(line: str) -> str | None:
@@ -183,17 +231,32 @@ class BreachTracker:
     logs and tallies can never drift out of sync with each other.
     """
 
-    def __init__(self, error_log_path: str | None = None, access_log_path: str | None = None):
+    def __init__(
+        self,
+        error_log_path: str | None = None,
+        access_log_path: str | None = None,
+        audit_log_path: str | None = None,
+    ):
         error_log = Path(error_log_path or config.WAF_ERROR_LOG)
         access_log = Path(access_log_path or config.WAF_ACCESS_LOG)
+        audit_log = Path(audit_log_path or config.WAF_AUDIT_LOG)
         state = self._load_state()
 
-        error_offset, error_stale = self._initial_offset(error_log, state.get("error_offset"))
+        error_offset, error_stale = self._initial_offset(
+            "error.log", error_log, state.get("error_offset")
+        )
         access_offset, access_stale = self._initial_offset(
-            access_log, state.get("access_offset")
+            "access.log", access_log, state.get("access_offset")
+        )
+        # Not fatal if this file doesn't exist yet (e.g. an older
+        # docker-compose.yml without MODSEC_AUDIT_LOG set) - _OffsetLog.new_lines()
+        # just returns [] forever in that case, same as any other missing log.
+        audit_offset, audit_stale = self._initial_offset(
+            "modsec_audit.log", audit_log, state.get("audit_offset")
         )
         self._error_log = _OffsetLog(error_log, error_offset)
         self._access_log = _OffsetLog(access_log, access_offset)
+        self._audit_log = _OffsetLog(audit_log, audit_offset)
 
         # If either log needed clamping, one of them was truncated (or
         # replaced with something smaller) without this state file also being
@@ -205,7 +268,7 @@ class BreachTracker:
         # anything on disk. Discard both tallies rather than only the one
         # offset that triggered the clamp, so log and tally state can't drift
         # apart from each other.
-        if error_stale or access_stale:
+        if error_stale or access_stale or audit_stale:
             self._blocked_counts: dict[str, int] = defaultdict(int)
             self._bypass_counts: dict[str, int] = defaultdict(int)
             self._bypass_samples: dict[str, dict[str, deque]] = defaultdict(_new_family_samples)
@@ -220,10 +283,16 @@ class BreachTracker:
                     )
 
     @staticmethod
-    def _initial_offset(log_path: Path, saved_offset: int | None) -> tuple[int, bool]:
+    def _initial_offset(label: str, log_path: Path, saved_offset: int | None) -> tuple[int, bool]:
         """Where a log's _OffsetLog should start reading from, and whether
         the saved checkpoint had to be clamped (a sign the whole checkpoint
         is stale, not just this one offset).
+
+        Prints a startup line either way, since "started fresh and skipped
+        existing content" and "resumed from a checkpoint" otherwise look
+        identical from the outside - the server starting after traffic
+        already fired silently skips it, and the only symptom is
+        get_breach_status() reporting nothing.
         """
         current_size = log_path.stat().st_size if log_path.exists() else 0
         if saved_offset is None:
@@ -232,6 +301,16 @@ class BreachTracker:
             # Start at end-of-file so a fresh tracker doesn't sweep in
             # unrelated pre-existing log history. Not "stale" - there's
             # nothing to distrust when there was no checkpoint to begin with.
+            if current_size > 0:
+                print(
+                    f"[BreachTracker] {label}: no checkpoint, but file already has "
+                    f"{current_size} bytes - starting at end-of-file, existing content "
+                    f"will NOT be counted. If the server started after traffic already "
+                    f"fired, stop it, set this log's offset to 0 in "
+                    f"{config.BREACH_STATE_FILE}, and restart."
+                )
+            else:
+                print(f"[BreachTracker] {label}: no checkpoint, file is empty - starting at 0.")
             return current_size, False
         if saved_offset > current_size:
             # The log is now *smaller* than the checkpoint (e.g. someone
@@ -239,7 +318,13 @@ class BreachTracker:
             # the old offset points past end-of-file and is meaningless
             # against the new content. Treat the log as fresh instead of
             # seeking past its end.
+            print(
+                f"[BreachTracker] {label}: checkpoint ({saved_offset}) is past the "
+                f"current file size ({current_size}) - log was truncated without "
+                f"clearing state; resetting to end-of-file."
+            )
             return current_size, True
+        print(f"[BreachTracker] {label}: resuming from checkpoint at offset {saved_offset}.")
         return saved_offset, False
 
     @staticmethod
@@ -255,6 +340,7 @@ class BreachTracker:
         payload = {
             "error_offset": self._error_log.offset,
             "access_offset": self._access_log.offset,
+            "audit_offset": self._audit_log.offset,
             "blocked_counts": dict(self._blocked_counts),
             "bypass_counts": dict(self._bypass_counts),
             "bypass_samples": {
@@ -271,12 +357,13 @@ class BreachTracker:
         tmp_path.replace(state_path)
 
     def poll(self) -> tuple[dict[str, int], dict[str, int]]:
-        """Scan any newly appended lines in both logs, update the running
-        per-endpoint tallies, persist the result, and return (blocked_counts,
-        bypass_counts).
+        """Scan any newly appended lines across all three logs, update the
+        running per-endpoint tallies, persist the result, and return
+        (blocked_counts, bypass_counts).
         """
         new_error_lines = self._error_log.new_lines()
         new_access_lines = self._access_log.new_lines()
+        new_audit_lines = self._audit_log.new_lines()
 
         for line in new_error_lines:
             endpoint = _extract_blocked_endpoint(line)
@@ -290,7 +377,15 @@ class BreachTracker:
                 family = _extract_family(line)
                 self._bypass_samples[endpoint][family].append(line.rstrip("\n"))
 
-        if new_error_lines or new_access_lines:
+        # Enrichment only - bypass_counts stays sourced from the access log
+        # alone, so counting behavior already proven correct is untouched.
+        for line in new_audit_lines:
+            parsed = _extract_audit_sample(line)
+            if parsed is not None:
+                endpoint, family, sample = parsed
+                self._bypass_samples[endpoint][family].append(sample)
+
+        if new_error_lines or new_access_lines or new_audit_lines:
             self._save_state()
 
         return dict(self._blocked_counts), dict(self._bypass_counts)

@@ -11,6 +11,10 @@ import os
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WAF_ERROR_LOG = os.path.join(REPO_ROOT, "waf-defense", "logs", "error.log")
 WAF_ACCESS_LOG = os.path.join(REPO_ROOT, "waf-defense", "logs", "access.log")
+# ModSecurity's own JSON audit log (docker-compose.yml's MODSEC_AUDIT_LOG) -
+# the only source with actual matched payload content for POST-body attacks;
+# see core/log_parser.py's module docstring.
+WAF_AUDIT_LOG = os.path.join(REPO_ROOT, "waf-defense", "logs", "modsec_audit.log")
 RULES_FILE = os.path.join(
     REPO_ROOT, "waf-defense", "modsec-rules", "ai_generated_rules.conf"
 )
