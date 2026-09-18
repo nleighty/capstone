@@ -6,9 +6,16 @@ own prior rules would undermine Sprint 5's RGI metric, which depends on old
 rules staying in place and generalizing across attack waves. This script is
 something a human runs by hand between runs.
 
-Does not touch the MCP server's in-memory breach tally (get_breach_status())
-- that already resets for free the moment the server process restarts, so
-just restart the server after running this if a clean tally is also needed.
+Also deletes BreachTracker's persisted state file (config.BREACH_STATE_FILE),
+which holds get_breach_status()'s per-endpoint tallies and each log's read
+offset - clearing the logs without also clearing this would leave a stale
+offset pointing past the now-empty file's end (harmless - BreachTracker
+clamps it back to 0, see core/log_parser.py) but also stale, no-longer-true
+tallies sitting alongside a freshly emptied log, which is exactly the kind
+of drift this script exists to prevent. Deleting it here means logs and
+tallies always move together. Still restart the server after running this:
+its in-memory copy of the (now-deleted) state won't reload on its own until
+the process restarts.
 
 Usage: python reset_state.py
 (will prompt for your sudo password - see the note below on why)
@@ -34,6 +41,11 @@ def reset() -> None:
     for log_path in (Path(config.WAF_ACCESS_LOG), Path(config.WAF_ERROR_LOG)):
         subprocess.run(["sudo", "truncate", "-s", "0", str(log_path)], check=True)
         print(f"Truncated {log_path}")
+
+    state_path = Path(config.BREACH_STATE_FILE)
+    if state_path.exists():
+        state_path.unlink()
+        print(f"Deleted {state_path}")
 
 
 if __name__ == "__main__":

@@ -107,6 +107,14 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
   pre-existing manual command in `docs/common-commands.md` already has; not a script bug, just
   something to run from a real terminal.
 
+> ⚠️ **Correction (Sprint 4):** `get_breach_status()` originally returned only blocked/bypass
+> *counts*. Integrating the Sprint 4 agent surfaced that this left no way to see what actually
+> bypassed - `read_waf_logs()` only tails the error log (what ModSecurity already caught), while
+> bypass evidence lives in the access log, which no tool exposed. Extended `get_breach_status()` to
+> also return `sample_bypasses`, a small rolling sample of raw bypass lines bucketed by
+> (endpoint, attack family) - see `defensive-agent/docs/Sprint4_Summary.md` for the full reasoning,
+> including why it's bucketed by family and not just endpoint.
+
 ## Status: Sprint 3 Complete
 
 | Deliverable | Status |

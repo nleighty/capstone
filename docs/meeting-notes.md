@@ -33,6 +33,28 @@
   - Still an open question — not addressed by the proposal. Worth revisiting if local-inference
     latency turns out to be a bottleneck during Sprint 2/3 testing.
 
+## 2026-09-17 — Defensive-side LLM: Claude instead of Ollama/Llama-3
+
+- **Decision** (reviewed with advisor): the defensive LangGraph agent will use Claude via the
+  Anthropic API, not the local Ollama/Llama-3 model the proposal defaulted to. The offensive side
+  stays on local Ollama/Llama-3 unchanged. This updates the "both sides default to Ollama" note
+  from 2026-07-03 above — Claude is no longer just an optional later swap, it's the Sprint 4 plan.
+  - **Why**: gives genuine independence between attacker and defender (not both driven by the same
+    model), and the guardrail problem that ruled out cloud LLMs for the *offensive* side (refusing
+    to generate exploit payloads) doesn't apply to the *defensive* side (writing WAF rules is
+    ordinary defensive work). MCP already decouples model choice from the tool layer per the
+    proposal's design (`docs/design-notes.md`, "Swapping LLMs"), so this swap doesn't require
+    touching `mcp-server/`.
+  - **Practical implications**: the defensive agent now needs its own Anthropic API key (metered,
+    separate from any claude.ai/Claude Code subscription — a subscription does not grant API
+    access). Call volume stays low since the agent only fires after `get_breach_status()` trips a
+    breach threshold, not per-request, so expected cost is minor. Resolves the 2026-07-03 "does
+    every request have to go through Claude" latency concern the same way: it doesn't, by design.
+  - API key setup: dedicated Console workspace + spend limit, key stored in a project-scoped
+    `.env` (see `defensive-agent/.env.example`) rather than a machine-wide shell export, so it
+    can't leak into unrelated work and is easy to rotate/revoke independently. (Originally staged
+    at repo root before `defensive-agent/` existed; moved once the subproject was scaffolded.)
+
 **Logistics**
 - 6 credits of capstone total; effectively split so summer work counts toward part of that, with
   1 course formally taken in the Fall.

@@ -15,12 +15,31 @@ RULES_FILE = os.path.join(
     REPO_ROOT, "waf-defense", "modsec-rules", "ai_generated_rules.conf"
 )
 
+# BreachTracker's persisted state (per-endpoint tallies + each log's read
+# offset) - anchored to this subproject's own directory since it's MCP-server
+# state, not something shared with waf-defense/attacker-pipeline. Survives a
+# server restart on purpose; see docs/debug-notes-sprint3-restart-offset.md
+# for why that matters and reset_state.py for how an *intentional* reset
+# clears it.
+MCP_SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+BREACH_STATE_FILE = os.environ.get(
+    "BREACH_STATE_FILE", os.path.join(MCP_SERVER_DIR, "state", "breach_tracker_state.json")
+)
+
 # Matches docker-compose.yml's `container_name: waf`.
 WAF_CONTAINER_NAME = os.environ.get("WAF_CONTAINER_NAME", "waf")
 
 # Per-endpoint breach count that trips get_breach_status()'s "tripped" flag.
 # Default of 5 matches the example used in docs/design-notes.md.
 BREACH_THRESHOLD = int(os.environ.get("BREACH_THRESHOLD", 5))
+
+# Cap on how many raw bypass lines BreachTracker keeps per (endpoint, attack
+# family) bucket - not per endpoint alone, since one endpoint can see more
+# than one family bypass in the same wave (see core/log_parser.py's module
+# docstring). Small on purpose: this is a representative sample for the
+# defensive agent to read, not an audit log - the exact count already lives
+# in bypass_counts.
+BYPASS_SAMPLE_LIMIT = int(os.environ.get("BYPASS_SAMPLE_LIMIT", 5))
 
 # Custom ModSecurity rule IDs, per the "Scoped Inclusion" pattern
 # (docs/design-notes.md). CRS reserves 900000-999999 for its own rules

@@ -23,10 +23,11 @@ from mcp.server.mcpserver import MCPServer
 app = MCPServer("WAF-Defense-Server")
 
 # Single tracker instance for the server's lifetime: state (the per-endpoint
-# tally and the log read offset) accumulates across tool calls and resets
-# only if the server process restarts - see docs/design-notes.md and this
-# sprint's summary for why that's an accepted, documented tradeoff rather
-# than a gap.
+# tally and each log's read offset) accumulates across tool calls and is also
+# persisted to config.BREACH_STATE_FILE (see core/log_parser.py), so it
+# survives a server restart too - only an intentional reset_state.py run
+# clears it. See docs/debug-notes-sprint3-restart-offset.md for the bug this
+# fixed.
 _breach_tracker = BreachTracker()
 
 
@@ -51,6 +52,14 @@ def get_breach_status(endpoint: str | None = None) -> dict:
     blocked payload is already handled and isn't the gap a new rule needs to
     close. Pass `endpoint` to restrict the result to one specific path (e.g.
     "/rest/user/login"); omit it to see every endpoint tracked so far.
+
+    Also returns sample_bypasses: {endpoint: {family: [raw access-log lines]}}
+    - a small rolling sample (config.BYPASS_SAMPLE_LIMIT per family) of what
+    actually got through, since counts alone don't say what a new rule should
+    match. Bucketed by attack family (read off _wave_marker, not payload
+    content - see core/log_parser.py) because one endpoint can see more than
+    one family bypass in the same wave; a flat per-endpoint sample would risk
+    losing one family's examples to whichever family bypasses more recently.
     """
     return _breach_tracker.status(endpoint)
 

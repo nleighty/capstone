@@ -12,10 +12,14 @@ AI-driven attacker and an AI-driven defender:
 - **Offensive side**: a local LLM (Ollama/Llama-3) obfuscates standard SQLi/XSS payloads into
   polymorphic variants and fires them at the target through the WAF.
 - **Target + WAF**: OWASP Juice Shop behind an Nginx/ModSecurity (OWASP CRS) reverse proxy.
-- **Defensive side**: a LangGraph agent that, once a breach threshold is crossed, reads WAF logs,
-  identifies the mutation pattern, and writes a new idempotent WAF rule — via a custom Python MCP
-  server (built on the official `mcp` SDK, `mcp-server/`) exposing: `read_waf_logs()`,
-  `get_breach_status()`, `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()`.
+- **Defensive side**: a LangGraph agent, powered by Claude via the Anthropic API, that once a
+  breach threshold is crossed reads WAF logs, identifies the mutation pattern, and writes a new
+  idempotent WAF rule — via a custom Python MCP server (built on the official `mcp` SDK,
+  `mcp-server/`) exposing: `read_waf_logs()`, `get_breach_status()`, `test_waf_configuration()`,
+  `write_idempotent_rule()`, `reload_waf()`. Using Claude here (vs. the proposal's default of
+  Ollama/Llama-3 for both sides) is a Sprint 4 decision made with the advisor — see
+  `docs/meeting-notes.md`, 2026-09-17 entry — that gives real independence between attacker and
+  defender models; the offensive side stays on local Ollama/Llama-3 unchanged.
 - **Evaluation**: an independent test harness scores each cycle on Mean Time to Mitigation (MTTM),
   Bypass Decay Rate (α, across attack waves of 50 payloads), Rule Generality Index (RGI — does a
   rule generalize to unseen variants, not just the one it was written for), and Regressive False
@@ -30,6 +34,7 @@ LLM since cloud LLMs guardrail against generating exploits).
 2. Attacker Pipeline & Test Harness — Ollama payload mutation, test orchestrator ✅ **Sprint 2 done**
 3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking ✅ **Sprint 3 done**
 4. Agent Integration & Dry Runs — LangGraph agent wired to MCP tools, idempotent rule IDs
+   🔶 **built, pending a live Docker/WAF dry run** — see `defensive-agent/docs/Sprint4_Summary.md`
 5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
 6. Report finalization, then presentation prep
 
@@ -51,8 +56,8 @@ over this list.
     run standalone (no attacker-pipeline dependency) or combined with a wave fired from the other
     walkthrough — see that doc for which to use.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
-    attacker pipeline, running the MCP server) spanning `waf-defense/`, `attacker-pipeline/`, and
-    `mcp-server/`.
+    attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
+    `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
 - `waf-defense/` — Docker environment (target app + ModSecurity WAF), logging, and the
   rule-injection target the defensive agent will write to.
   - `waf-defense/docs/` — sprint summaries and debug notes specific to this subproject.
@@ -68,8 +73,17 @@ over this list.
   operator-only `reset_state.py` for clearing rules/logs between test runs. This is the future
   Sprint 4 defensive agent's tool layer, not the agent itself.
   - `mcp-server/docs/` — sprint summaries and debug notes specific to this subproject.
-- Future subprojects (the defensive agent itself) will likely land as sibling directories here,
-  each with their own `docs/` if needed.
+- `defensive-agent/` — the Sprint 4 defensive "brain": a LangGraph ReAct agent (Claude via
+  `langchain-anthropic`) that connects to `mcp-server`'s tools over MCP (`langchain-mcp-adapters`),
+  deterministically checks `get_breach_status()` and assigns each newly-seen endpoint a stable
+  `rule_id` (`core/rule_registry.py` — code-owned, never left to the LLM, since that's what actually
+  makes "static rule IDs" idempotent rather than hoped-for), then hands the LLM the evidence
+  (`get_breach_status()`'s `sample_bypasses`, bucketed by attack family) to design and write a rule
+  via `write_idempotent_rule` → `test_waf_configuration` → `reload_waf`. Runs as a single "dry run"
+  pass (`agent.py`), not a polling loop — see `defensive-agent/docs/Sprint4_Summary.md`.
+  - `defensive-agent/docs/` — sprint summaries and debug notes specific to this subproject.
+- Future subprojects (automated multi-wave testing / metrics, Sprint 5) will likely land as sibling
+  directories here, each with their own `docs/` if needed.
 
 ## Where to look for current status
 Don't treat this file as the status tracker — check the most recent sprint summary in the relevant

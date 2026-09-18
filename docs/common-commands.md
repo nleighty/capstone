@@ -113,16 +113,18 @@ cd ~/capstone/mcp-server
 source .venv/bin/activate
 python3 reset_state.py
 ```
-After running it, restart the server (its in-memory breach tally only resets on restart) and
-reload the WAF so it picks up the now-empty rules file:
+It also deletes the server's persisted breach-tally state file, so restart the server afterward to
+pick up the cleared state (its in-memory copy won't drop the old tally on its own until the process
+restarts), and reload the WAF so it picks up the now-empty rules file:
 ```bash
 docker exec waf nginx -s reload
 ```
 
 ### Demoing the tools by hand (`demo_client.py`)
 
-Standing in for the not-yet-built Sprint 4 agent: a small interactive MCP client with a numbered
-menu over the five tools. Requires `server.py` already running (above) in another terminal:
+A small interactive MCP client with a numbered menu over the five tools, for exercising them
+manually without a live agent involved (e.g. isolating whether a tool call works on its own before
+blaming the agent). Requires `server.py` already running (above) in another terminal:
 ```bash
 cd ~/capstone/mcp-server
 source .venv/bin/activate
@@ -133,6 +135,21 @@ Pick a tool by number, fill in the prompted arguments (blank keeps the default w
 current total blocked-request count (floor of 50) instead of a fixed guess, so it won't silently
 miss lines from a larger-than-expected wave. See `docs/demo-walkthrough-mcp.md` for a full
 rehearsable script built around this client.
+
+## Running the defensive agent
+
+A single "dry run" pass: connects to the MCP server, checks every endpoint via
+`get_breach_status()`, and for any that have tripped the breach threshold, autonomously runs
+`read_waf_logs` (optional context) → `write_idempotent_rule` → `test_waf_configuration` →
+`reload_waf`, printing each step as it happens. Runs once and exits — this is a human-triggered dry
+run, not a polling loop (see `defensive-agent/docs/Sprint4_Summary.md`). Requires `mcp-server/server.py`
+already running (above) and the WAF stack up:
+```bash
+cd ~/capstone/defensive-agent
+source .venv/bin/activate
+python3 agent.py
+```
+Needs `ANTHROPIC_API_KEY` set in `defensive-agent/.env` (see `defensive-agent/.env.example`).
 
 ## Metrics output
 
