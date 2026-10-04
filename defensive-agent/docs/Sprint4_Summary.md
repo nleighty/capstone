@@ -2,7 +2,8 @@
 
 **Project:** An Adaptive Defense Framework Against GenAI-Driven Web Payload Polymorphism Using MCP
 **Sprint Dates:** work completed 2026-09-17, live Docker verification completed 2026-09-18,
-POST-body payload visibility gap closed 2026-10-02, `read_current_rule` tool added 2026-10-02
+POST-body payload visibility gap closed 2026-10-02, `read_current_rule` tool added 2026-10-02,
+stale-log resurrection bug found and fixed 2026-10-04
 **Student:** Nic Leighty
 
 ## Objective
@@ -180,6 +181,71 @@ correction note for the pointer back.
   re-verified the canary now passes through normally (`401`) while real coverage and benign traffic
   are both unaffected.
 
+  **A second, more ambiguous test (2026-10-04) surfaced two real bugs.** The canary test's prior
+  content was an obviously-synthetic marker with a description literally saying "temporary" - a
+  risk that the agent preserved it partly by recognizing the test tell, not purely on evidence-based
+  judgment. Follow-up test: planted a *disguised* prior rule (a real, plausible path-traversal /
+  command-injection pattern with a boring, realistic description, no "test" language) for the same
+  `rule_id`, confirmed it alone blocked matching payloads, then re-ran `agent.py` against the
+  endpoint's existing real sqli evidence (unrelated to path traversal). Result: the disguised
+  pattern *did* survive with a substantive justification ("absence of bypasses isn't evidence
+  they're safe to stop blocking") - the core finding from the first test held up. But the rewritten
+  rule also resurrected `ZZCANARYZZ`, a pattern deliberately removed two rounds earlier that no
+  longer existed anywhere in the live rule.
+
+  Root cause: `read_waf_logs` (which the agent also called, for supplementary context) returned
+  error-log lines going back to the original canary test - logs aren't reset between distinct test
+  sessions unless `reset_state.py` is run, and nothing had been. Those stale entries still contained
+  the *old* rule's own log message, literally reading `"retains legacy ZZCANARYZZ coverage"`. The
+  agent conflated a pattern merely *mentioned in historical log output* with a pattern that
+  `read_current_rule` (the actually-authoritative source) said is part of the rule right now - it
+  wasn't; `read_current_rule` at that point returned only the path-traversal/command-injection
+  content, confirmed by directly testing that the canary wasn't blocking anything immediately before
+  this run. This generalizes beyond the staged test: in Sprint 5's continuous multi-wave operation,
+  error logs accumulate across many rule revisions, so a later run could resurrect content from an
+  earlier, since-corrected version of a rule purely by reading old log messages.
+
+  A second bug surfaced while diagnosing the first: `core/graph.py`'s streaming-print loop only
+  looked at `step["messages"][-1]`, so when Claude issued `read_current_rule` and `read_waf_logs` as
+  parallel tool calls in one turn, only the *last* tool result in that batch ever printed - the
+  actual (correct) `read_current_rule` output was silently invisible in the transcript the whole
+  time, which is why this took direct file inspection to diagnose rather than just reading the log.
+
+  **Fixes applied:**
+  - `core/graph.py`'s print loop now tracks how many messages it's already printed and prints
+    `messages[printed:]` each step, so every message in a batch is shown, not just the last one -
+    pure observability, no behavior change.
+  - The system prompt now explicitly distinguishes the two tools: `read_current_rule` is the *only*
+    authoritative source for what a rule currently contains; `read_waf_logs` is historical audit
+    trail that may reference a pattern or message from an earlier, since-revised version of the same
+    rule, and a mention there is not by itself evidence it belongs in the rule being written now.
+  - Not a code fix, but worth recording: for *staged, deliberate* comparisons like this one (as
+    opposed to Sprint 5's continuous operation, where logs need to persist), running
+    `reset_state.py` between distinct test "chapters" avoids exactly this kind of stale-log
+    bleed-through muddying results - a testing-methodology habit, not a substitute for the prompt
+    fix, which is what actually matters once Sprint 5 can't reset mid-run.
+  - Re-verified after both fixes: the rule was manually cleaned (canary alternative removed, real
+    path-traversal and sqli coverage kept) and confirmed live - canary no longer blocks (`401`),
+    path-traversal still blocks (`403`), sqli tautology still blocks (`403`), benign login
+    unaffected (`401`).
+
+  **Re-tested the actual fix with a third round (2026-10-04), not just reasoned about it.** A
+  prompt clarification is advisory, not a guarantee, so it needed its own empirical check rather
+  than assuming it worked. Planted a third, never-before-used disguised pattern (XXE/XML entity
+  injection) as the *only* current rule content, with the stale `ZZCANARYZZ` log entries from round
+  two still sitting in `read_waf_logs`' range (confirmed: only 32 lines in `error.log`, the stale
+  entries well within any read window) as live temptation. Re-ran `agent.py` against the same
+  endpoint's cached sqli evidence. Result: the agent's own reasoning explicitly named and declined
+  the trap - *"The error log contains two historical hits on id 1000000 referencing a `ZZCANARYZZ`
+  pattern... That text is from superseded revisions of this rule - `read_current_rule` shows no such
+  pattern today, so it is not part of current coverage and I did not reintroduce it. Log history
+  records what a rule* was*, not what it* is*."* Confirmed empirically, not just by narration: the
+  rewritten rule contains the genuinely-current XXE pattern and new sqli coverage, and does not
+  contain `ZZCANARYZZ` - verified both by reading the rule file directly and by firing live
+  requests (XXE probe `403`, canary `401`, new sqli coverage `403`, benign login `401`). The
+  parallel-tool-call print fix also paid off immediately: this run's transcript showed
+  `read_current_rule`'s actual returned text for the first time, instead of silently dropping it.
+
 ## Validation
 
 **What was verified end-to-end, against the real running `mcp-server` and a real Claude API call:**
@@ -247,7 +313,6 @@ Also worth addressing at that point:
   prompt's instructions — fine for a human-watched dry run, a real gap for unattended automation.
 - The audit log's disk growth under sustained multi-wave runs (now reset between runs via
   `reset_state.py`, but worth watching once waves run back-to-back for hours rather than minutes).
-- The canary test used a single, obvious, distinctive pattern - worth a follow-up with a more
-  realistic "competing evidence" scenario (e.g. two genuinely similar but distinct attack variants
-  where the merge decision is less clear-cut) to see how the agent's judgment holds up under more
-  ambiguity than "an unmistakably synthetic marker vs. real evidence."
+- **Done 2026-10-04** (see Issues Encountered): ran the disguised-pattern follow-up to the canary
+  test. Confirmed the preservation judgment holds on realistic, undisguised content, but surfaced
+  the stale-log-resurrection bug and the parallel-tool-call print bug, both now fixed.

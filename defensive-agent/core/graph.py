@@ -43,12 +43,21 @@ just the first one. You may also call read_waf_logs for supplementary context (e
 attacks CRS already blocks), but the bypass samples you're given are the primary evidence, since \
 they show what actually got through - the error log only shows what was already caught.
 
+read_current_rule and read_waf_logs answer different questions - do not treat them as \
+interchangeable. read_current_rule's return value is the ONLY authoritative source for what this \
+rule_id currently contains. read_waf_logs is a historical audit trail, not a snapshot of current \
+state: an old entry may reference a pattern or message from an earlier version of this same rule \
+that has since been revised or removed. A pattern or description text appearing in log history is \
+not, by itself, evidence that it belongs in the rule you write now - only trust read_current_rule \
+for that question.
+
 Steps:
 1. Call read_current_rule with your assigned rule_id FIRST, before anything else. If it returns an \
 existing rule, treat its current coverage as a floor, not a draft to discard - your job is to \
 extend it to also cover today's evidence, not silently narrow it. Today's sample bypasses are \
 capped and may not include every pattern the existing rule already protects against; a pattern not \
-bypassing right now isn't necessarily safe to stop blocking.
+bypassing right now isn't necessarily safe to stop blocking. This applies only to what \
+read_current_rule itself returns - not to anything you later see mentioned in read_waf_logs.
 2. Look at the sample bypassing requests. Identify the pattern(s) responsible - the payload is in \
 the query string / body content shown in each raw line.
 3. Design attack_pattern: a single regex (using alternation to cover every distinct pattern that \
@@ -113,18 +122,27 @@ async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family
     )
 
     final_state = None
+    printed = 0
     async for step in agent.astream({"messages": [("user", task)]}, stream_mode="values"):
         final_state = step
-        last_message = step["messages"][-1]
-        # AIMessages with tool calls print the call; ToolMessages print the
-        # result - printing both is what makes the sequence visible live.
-        tool_calls = getattr(last_message, "tool_calls", None)
-        if tool_calls:
-            for call in tool_calls:
-                print(f"  [{endpoint}] -> calling {call['name']}({call['args']})")
-        elif getattr(last_message, "type", None) == "tool":
-            print(f"  [{endpoint}] <- {last_message.name} result: {last_message.content}")
-        elif getattr(last_message, "content", None):
-            print(f"  [{endpoint}] agent: {last_message.content}")
+        messages = step["messages"]
+        # stream_mode="values" re-emits the *full* accumulated message list
+        # each step, and a single step can add more than one message at once
+        # (e.g. Claude issuing read_current_rule and read_waf_logs as
+        # parallel tool calls, or their two ToolMessage results both landing
+        # in the same step) - only looking at messages[-1] silently drops
+        # every message but the last one in a batch. Printing messages[printed:]
+        # instead prints every new message exactly once, in order, regardless
+        # of how many arrived in one step.
+        for message in messages[printed:]:
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls:
+                for call in tool_calls:
+                    print(f"  [{endpoint}] -> calling {call['name']}({call['args']})")
+            elif getattr(message, "type", None) == "tool":
+                print(f"  [{endpoint}] <- {message.name} result: {message.content}")
+            elif getattr(message, "content", None):
+                print(f"  [{endpoint}] agent: {message.content}")
+        printed = len(messages)
 
     return final_state
