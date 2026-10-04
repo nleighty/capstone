@@ -22,6 +22,30 @@ def _id_line_pattern(rule_id: int) -> re.Pattern:
     return re.compile(r"id:%d," % rule_id)
 
 
+def read_rule(rule_id: int) -> str:
+    """Return the existing rule line for `rule_id`, or a clear "no existing
+    rule" message if one hasn't been written yet. Lets a caller see what
+    write_rule() is about to overwrite before deciding whether to extend or
+    replace it - without this, an overwrite-by-id is blind, and a rewrite
+    scoped to only today's evidence could silently drop coverage an earlier
+    version of the rule had for a pattern that isn't bypassing right now.
+    """
+    if not (config.CUSTOM_RULE_ID_MIN <= rule_id <= config.CUSTOM_RULE_ID_MAX):
+        return (
+            f"Error: rule_id {rule_id} is outside the reserved custom rule "
+            f"range ({config.CUSTOM_RULE_ID_MIN}-{config.CUSTOM_RULE_ID_MAX})."
+        )
+
+    rules_path = Path(config.RULES_FILE)
+    if rules_path.exists():
+        id_pattern = _id_line_pattern(rule_id)
+        for line in rules_path.read_text().splitlines():
+            if id_pattern.search(line):
+                return line
+
+    return f"No existing rule for id:{rule_id} yet - this will be a new rule."
+
+
 def write_rule(rule_id: int, attack_pattern: str, description: str) -> str:
     """Write (or overwrite) a rule in config.RULES_FILE. `attack_pattern` is a
     raw regex (no need to prefix it with an operator - the template adds

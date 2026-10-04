@@ -1,0 +1,4 @@
+langgraph
+langchain-anthropic
+langchain-mcp-adapters
+python-dotenv

@@ -1,6 +1,8 @@
 # Logs
 waf-defense/logs/*.log
 attacker-pipeline/metrics/*.csv
+mcp-server/state/
+defensive-agent/state/
 
 # Secrets / env
 .env
