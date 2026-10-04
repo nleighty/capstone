@@ -22,7 +22,13 @@ from langgraph.prebuilt import create_react_agent
 
 import config
 
-REACT_TOOL_NAMES = ("read_waf_logs", "write_idempotent_rule", "test_waf_configuration", "reload_waf")
+REACT_TOOL_NAMES = (
+    "read_current_rule",
+    "read_waf_logs",
+    "write_idempotent_rule",
+    "test_waf_configuration",
+    "reload_waf",
+)
 
 SYSTEM_PROMPT = """You are the defensive half of an adaptive WAF security system.
 
@@ -38,21 +44,27 @@ attacks CRS already blocks), but the bypass samples you're given are the primary
 they show what actually got through - the error log only shows what was already caught.
 
 Steps:
-1. Look at the sample bypassing requests. Identify the pattern(s) responsible - the payload is in \
+1. Call read_current_rule with your assigned rule_id FIRST, before anything else. If it returns an \
+existing rule, treat its current coverage as a floor, not a draft to discard - your job is to \
+extend it to also cover today's evidence, not silently narrow it. Today's sample bypasses are \
+capped and may not include every pattern the existing rule already protects against; a pattern not \
+bypassing right now isn't necessarily safe to stop blocking.
+2. Look at the sample bypassing requests. Identify the pattern(s) responsible - the payload is in \
 the query string / body content shown in each raw line.
-2. Design attack_pattern: a single regex (using alternation if more than one family is present) \
-that matches these payloads and their likely variants, without being so broad it would catch \
-ordinary benign input. It will be matched via ModSecurity's @rx operator against \
+3. Design attack_pattern: a single regex (using alternation to cover every distinct pattern that \
+needs coverage - both anything already in the existing rule from step 1, and anything new from \
+today's evidence) that matches these payloads and their likely variants, without being so broad it \
+would catch ordinary benign input. It will be matched via ModSecurity's @rx operator against \
 REQUEST_COOKIES|ARGS automatically - you only supply the raw regex body.
-3. Call write_idempotent_rule using EXACTLY the rule_id you were given - never invent your own. \
+4. Call write_idempotent_rule using EXACTLY the rule_id you were given - never invent your own. \
 Reusing the same ID is what makes a repeat fix overwrite the old rule instead of piling up a \
 duplicate.
-4. Call test_waf_configuration. If it reports failure, revise attack_pattern and call \
+5. Call test_waf_configuration. If it reports failure, revise attack_pattern and call \
 write_idempotent_rule again with the same rule_id, then re-test.
-5. Only once a test reports success, call reload_waf.
+6. Only once a test reports success, call reload_waf.
 
-Always call tools in this order: read (optional) -> write -> test -> reload. Never call reload_waf \
-unless the most recent test_waf_configuration reported success."""
+Always call tools in this order: read_current_rule -> read_waf_logs (optional) -> write -> test -> \
+reload. Never call reload_waf unless the most recent test_waf_configuration reported success."""
 
 
 def build_agent(tools_by_name: dict):

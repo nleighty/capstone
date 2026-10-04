@@ -76,6 +76,19 @@ def test_waf_configuration() -> str:
 
 
 @app.tool()
+def read_current_rule(rule_id: int) -> str:
+    """Return the existing custom rule line for `rule_id`, if one has already
+    been written, or a clear "no existing rule" message if this is a fresh
+    ID. Call this before write_idempotent_rule() when re-visiting an endpoint
+    that already has a rule - write_idempotent_rule() overwrites by id, so
+    without checking first, a rewrite scoped only to today's evidence could
+    silently drop coverage the existing rule already had for a pattern that
+    isn't bypassing right now.
+    """
+    return rule_writer.read_rule(rule_id)
+
+
+@app.tool()
 def write_idempotent_rule(rule_id: int, attack_pattern: str, description: str) -> str:
     """Write (or overwrite) a custom ModSecurity rule in the AI-generated
     rules file, keyed by `rule_id` (1000000-1999999). Calling this again with

@@ -104,8 +104,11 @@ python3 server.py
 Prints a startup line per log noting the offset it's starting from — watch for it, especially a
 "file already has N bytes" warning, which means traffic fired before this start and will be missed.
 
-Exposes 5 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `test_waf_configuration`,
-`write_idempotent_rule`, `reload_waf`. See `mcp-server/docs/Sprint3_Summary.md` for what each does.
+Exposes 6 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `read_current_rule`,
+`test_waf_configuration`, `write_idempotent_rule`, `reload_waf`. The first 5 are Sprint 3's original
+set (see `mcp-server/docs/Sprint3_Summary.md`); `read_current_rule` was added in Sprint 4
+(`defensive-agent/docs/Sprint4_Summary.md`) so the defensive agent can see what it's about to
+overwrite before deciding whether to extend or replace an existing rule.
 
 ## Running the attacker pipeline
 

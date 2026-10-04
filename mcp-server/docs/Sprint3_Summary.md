@@ -115,6 +115,12 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
 > (endpoint, attack family) - see `defensive-agent/docs/Sprint4_Summary.md` for the full reasoning,
 > including why it's bucketed by family and not just endpoint.
 
+> ⚠️ **Correction (Sprint 4):** a 6th tool, `read_current_rule(rule_id)`, was added so the defensive
+> agent can see an existing rule's current content before `write_idempotent_rule()` overwrites it by
+> id - without this, a rewrite scoped only to the current evidence window could silently drop
+> coverage an earlier version of the rule had for a pattern that isn't bypassing right now. See
+> `defensive-agent/docs/Sprint4_Summary.md`.
+
 ## Status: Sprint 3 Complete
 
 | Deliverable | Status |

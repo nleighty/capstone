@@ -38,7 +38,7 @@ def reset() -> None:
     # `truncate` in place (not delete-and-recreate) matters: nginx holds the
     # file open, so replacing the file rather than truncating it in place
     # would leave nginx writing to the old, now-unlinked file forever.
-    for log_path in (Path(config.WAF_ACCESS_LOG), Path(config.WAF_ERROR_LOG)):
+    for log_path in (Path(config.WAF_ACCESS_LOG), Path(config.WAF_ERROR_LOG), Path(config.WAF_AUDIT_LOG)):
         subprocess.run(["sudo", "truncate", "-s", "0", str(log_path)], check=True)
         print(f"Truncated {log_path}")
 

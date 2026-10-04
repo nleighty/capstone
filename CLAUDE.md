@@ -15,9 +15,9 @@ AI-driven attacker and an AI-driven defender:
 - **Defensive side**: a LangGraph agent, powered by Claude via the Anthropic API, that once a
   breach threshold is crossed reads WAF logs, identifies the mutation pattern, and writes a new
   idempotent WAF rule — via a custom Python MCP server (built on the official `mcp` SDK,
-  `mcp-server/`) exposing: `read_waf_logs()`, `get_breach_status()`, `test_waf_configuration()`,
-  `write_idempotent_rule()`, `reload_waf()`. Using Claude here (vs. the proposal's default of
-  Ollama/Llama-3 for both sides) is a Sprint 4 decision made with the advisor — see
+  `mcp-server/`) exposing: `read_waf_logs()`, `get_breach_status()`, `read_current_rule()`,
+  `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()`. Using Claude here (vs. the
+  proposal's default of Ollama/Llama-3 for both sides) is a Sprint 4 decision made with the advisor — see
   `docs/meeting-notes.md`, 2026-09-17 entry — that gives real independence between attacker and
   defender models; the offensive side stays on local Ollama/Llama-3 unchanged.
 - **Evaluation**: an independent test harness scores each cycle on Mean Time to Mitigation (MTTM),

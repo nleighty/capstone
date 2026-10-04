@@ -1,7 +1,8 @@
 # Sprint 4 Summary — Agent Integration & Dry Runs
 
 **Project:** An Adaptive Defense Framework Against GenAI-Driven Web Payload Polymorphism Using MCP
-**Sprint Dates:** work completed 2026-09-17, live Docker verification completed 2026-09-18
+**Sprint Dates:** work completed 2026-09-17, live Docker verification completed 2026-09-18,
+POST-body payload visibility gap closed 2026-10-02, `read_current_rule` tool added 2026-10-02
 **Student:** Nic Leighty
 
 ## Objective
@@ -60,9 +61,10 @@ correction note for the pointer back.
   reused forever. This is what actually makes idempotency real rather than hoped-for: the LLM is
   told the ID as a fixed fact, never asked to invent or remember one across separate runs.
 - **`core/graph.py`** — builds a `langgraph.prebuilt.create_react_agent` (Claude, bound to
-  `read_waf_logs`, `write_idempotent_rule`, `test_waf_configuration`, `reload_waf` — deliberately
-  *not* `get_breach_status`, which stays a deterministic pre-step in `agent.py`) and drives one
-  invocation per tripped endpoint, streaming each tool call/result to the console.
+  `read_current_rule`, `read_waf_logs`, `write_idempotent_rule`, `test_waf_configuration`,
+  `reload_waf` — deliberately *not* `get_breach_status`, which stays a deterministic pre-step in
+  `agent.py`) and drives one invocation per tripped endpoint, streaming each tool call/result to the
+  console.
 - **`config.py`** — same `os.environ.get(...)` pattern as the other two subprojects; loads
   `.env` via `python-dotenv` for `ANTHROPIC_API_KEY`.
 
@@ -129,13 +131,54 @@ correction note for the pointer back.
   POST) - the actual injected value lives in the JSON body, which nginx's access log never records.
   The error log's `[data ""]` field was also empty for these blocked attempts. This is real for POST
   targets (`/rest/user/login`) but not GET targets (`/rest/products/search`'s sqli/xss ride in the
-  query string, which *is* logged) - the agent wrote a working rule for `/rest/user/login` from
-  generic SQLi domain knowledge, not from evidence of the actual mutations, and it happened to work
-  against the tested patterns, but this is a real gap against this project's own "identifies the
-  mutation pattern" goal for POST endpoints. Not fixed this sprint - flagged for Sprint 5 (see "Next
-  Up"); a fix would need CRS's request-body logging enabled (e.g. `SecAuditLogParts` including body
-  parts, or a ModSecurity rule that logs `REQUEST_BODY` on match) since nginx's own access log format
-  has no body field to begin with.
+  query string, which *is* logged).
+  - **Fixed 2026-10-02.** ModSecurity's own JSON audit log already captures the actual matched
+    request data (e.g. `"Matched Data: ... found within ARGS:json.email: ' OR 1=1--"`) via its
+    normal signature matching - it just wasn't being written anywhere readable (defaulted to
+    `/dev/stdout`). Redirected it into the existing log bind mount via `MODSEC_AUDIT_LOG` in
+    `waf-defense/docker-compose.yml`, switched `MODSEC_AUDIT_ENGINE` to `On` (the default
+    `RelevantOnly` only logs 4xx/5xx, which would miss a genuinely successful 200-status bypass),
+    and added `_extract_audit_sample()` (`mcp-server/core/log_parser.py`) to fold matched-data
+    evidence into the same per-(endpoint, family) `sample_bypasses` buckets - purely additive,
+    `bypass_counts` stays sourced from the access log alone. Verified two ways: live, firing a real
+    attacker-pipeline wave and confirming a full-CRS-evasion bypass correctly fell back to the bare
+    URI (no rule matched, nothing to enrich with); and directly, feeding `_extract_audit_sample()` a
+    synthetic entry matching the real confirmed schema with a non-blocked status and real matched
+    data, which correctly parsed out `(endpoint, family, sample)` with the actual injected value
+    intact. The one combination not yet seen occurring naturally in a wave - a bypass that *also*
+    trips a CRS signature below the blocking threshold - is mechanically identical to both verified
+    paths, so this is considered proven rather than still-open.
+  - **Found alongside this fix**: `reset_state.py` only truncated the access/error logs, never this
+    new audit log - so it grew unbounded across resets (15MB within an hour of light testing under
+    `MODSEC_AUDIT_ENGINE: On`). Fixed by adding `config.WAF_AUDIT_LOG` to `reset_state.py`'s
+    truncation loop.
+- **The idempotency mechanism had a blind-overwrite gap** (found 2026-10-02, via a user question
+  after a real 2-wave test): `RuleRegistry` guarantees the *same* `rule_id` is reused for a given
+  endpoint, and `write_idempotent_rule()` always overwrites that id's line - but nothing let the
+  agent see what that line *currently said* before overwriting it. A re-trip on an already-ruled
+  endpoint hands the agent only the current `sample_bypasses` window (capped), so a rewrite based
+  solely on that evidence could silently narrow an existing rule - dropping coverage for a pattern
+  that isn't bypassing *right now* but was previously handled. Fixed by adding a 6th MCP tool,
+  `read_current_rule(rule_id)` (`mcp-server/core/rule_writer.py`'s `read_rule()` +
+  `mcp-server/server.py`), and updating the agent's system prompt (`core/graph.py`) to call it first
+  and treat any existing rule's coverage as a floor to extend, not a draft to discard.
+
+  **Verified live with a controlled canary test (2026-10-02).** Unit-testing `read_rule()` only
+  proves the tool returns the right text - it doesn't prove the agent actually *acts* on it rather
+  than calling it and discarding the result ("malicious compliance" with step 1 of the prompt). To
+  test the real behavior: planted a distinctive, unrealistic pattern (`ZZCANARYZZ`) as the *entire*
+  rule content for `/rest/user/login`'s `rule_id`, confirmed it alone blocked (`403`) a request
+  carrying it, then re-ran `agent.py` against that endpoint's already-tripped state (evidence
+  entirely unrelated to the canary). The agent called `read_current_rule` first, explicitly reasoned
+  about whether to keep or drop the canary ("today's capped sample isn't evidence that a pattern is
+  safe to stop blocking"), and chose to preserve it - confirmed not just by its own narration but by
+  reading the rewritten rule directly: `ZZCANARYZZ` was literally present as the first alternative in
+  the new regex, and the `msg` field even self-documented `retains legacy ZZCANARYZZ coverage`.
+  Re-fired three checks after the rewrite: the canary still blocked (`403`), the newly-inferred real
+  SQLi coverage also blocked (`403`), and a benign login was unaffected (`401`). All three passed.
+  Cleaned up afterward by writing the same rule body with just the canary alternative removed,
+  re-verified the canary now passes through normally (`401`) while real coverage and benign traffic
+  are both unaffected.
 
 ## Validation
 
@@ -184,7 +227,8 @@ differently live, but it hasn't been watched happen against a real wave yet.
 
 | Deliverable | Status |
 |---|---|
-| LangGraph agent wired to the 5 MCP tools | ✅ Done, verified live end-to-end |
+| LangGraph agent wired to the 6 MCP tools | ✅ Done, verified live end-to-end |
+| Idempotent updates preserve prior rule coverage (`read_current_rule`) | ✅ Added and verified live 2026-10-02 via controlled canary test |
 | Structured JSON tool outputs | ✅ Done — native Claude tool-use, no bespoke layer needed |
 | Static rule IDs for idempotency | ✅ Done, verified live — same ID reused, no duplicate rule lines |
 | Bypass-visibility gap in `get_breach_status()` | ✅ Found and fixed |
@@ -192,14 +236,18 @@ differently live, but it hasn't been watched happen against a real wave yet.
 | `test_waf_configuration()` / `reload_waf()` against a real WAF container | ✅ Verified live 2026-09-18 |
 | Real `attacker-pipeline` wave as the traffic source | ✅ Verified live 2026-09-18 |
 | Rule confirmed actually blocking, benign traffic unaffected | ✅ Verified live via direct curl tests |
-| POST-body payload visibility for `sample_bypasses` | ⬜ Known gap, not fixed this sprint - see Issues Encountered |
+| POST-body payload visibility for `sample_bypasses` | ✅ Found and fixed 2026-10-02 - see Issues Encountered |
 
 ## Next Up (Sprint 5)
 
 Per the timeline: Automated Testing — multi-wave attack loops, MTTM/α/RGI/RFPR metrics collection.
 Also worth addressing at that point:
-- **POST-body payload visibility** (see Issues Encountered) - needed before RGI can mean much for
-  POST endpoints, since right now the agent can't actually see what it's generalizing from there.
 - Whether an outer `StateGraph` is now warranted (this sprint deliberately deferred that).
 - Code-enforced test→reload ordering as a backstop, rather than relying solely on the system
   prompt's instructions — fine for a human-watched dry run, a real gap for unattended automation.
+- The audit log's disk growth under sustained multi-wave runs (now reset between runs via
+  `reset_state.py`, but worth watching once waves run back-to-back for hours rather than minutes).
+- The canary test used a single, obvious, distinctive pattern - worth a follow-up with a more
+  realistic "competing evidence" scenario (e.g. two genuinely similar but distinct attack variants
+  where the merge decision is less clear-cut) to see how the agent's judgment holds up under more
+  ambiguity than "an unmistakably synthetic marker vs. real evidence."
