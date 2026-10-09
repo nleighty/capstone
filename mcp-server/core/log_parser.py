@@ -67,7 +67,7 @@ log alone, unchanged.
 import json
 import re
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from pathlib import Path
 
 import config
@@ -79,7 +79,7 @@ _ERROR_LINE_RE = re.compile(r'request: "[A-Z]+ (\S+) HTTP')
 
 # Matches the request line + status code in nginx's combined access-log
 # format, e.g. `"GET /path?q=x HTTP/1.1" 200 824 ...`.
-_ACCESS_LINE_RE = re.compile(r'"[A-Z]+ (\S+) HTTP/[\d.]+" (\d{3})')
+_ACCESS_LINE_RE = re.compile(r'"([A-Z]+) (\S+) HTTP/[\d.]+" (\d{3})')
 
 # Pulls the attack family straight out of _wave_marker's own value - see the
 # module docstring for why this beats inspecting payload content. Matches
@@ -94,6 +94,89 @@ _FAMILY_RE = re.compile(r"_wave_marker=w\d+-([a-z]+)-")
 _MARKER_RE = re.compile(r"_wave_marker=[\w-]+")
 
 
+# The seed id inside a marker (`w3-sqli-05-2` -> `sqli-05`): which seed payload
+# in attacker-pipeline/payloads/seeds.py a variant was mutated from. Used to
+# keep the sample buffer *diverse across seeds* rather than recency-ordered -
+# see BreachTracker._add_sample. Like the family, it is read off the marker's
+# own structure, never off payload content.
+_SEED_RE = re.compile(r"_wave_marker=w\d+-([a-z]+-\d+)-")
+
+
+def _make_sample(text: str, method: str | None, uri: str | None, body: str | None = None,
+                 content_type: str | None = None) -> dict:
+    """Build the structured record stored for one bypassing request.
+
+    `text` is what the defensive agent reads (unchanged from when samples were
+    bare strings). The remaining fields exist so a later replay check
+    (Sprint 4.5 step B) can re-send the *same* request without having to
+    re-parse `text` - method/uri/body/content_type are the minimum needed to
+    reconstruct it. `body` is stored in full (not truncated like `text`): a
+    chopped JSON body would no longer parse and would replay as a different
+    request than the one that bypassed.
+    """
+    marker = _MARKER_RE.search(uri or text)
+    seed = _SEED_RE.search(uri or text)
+    return {
+        "text": text,
+        "marker": marker.group(0) if marker else None,
+        "seed": seed.group(1) if seed else "unknown",
+        "method": method,
+        "uri": uri,
+        "body": body,
+        "content_type": content_type,
+    }
+
+
+def _coerce_sample(entry) -> dict:
+    """Accept a sample loaded from the persisted state file. Older state
+    files stored samples as bare strings; wrap those so a server upgraded
+    across this change keeps working (they just aren't replayable)."""
+    if isinstance(entry, dict):
+        return entry
+    return _make_sample(str(entry), method=None, uri=None)
+
+
+_LOG_TIME_RE = re.compile(r"^(\d{4}/\d\d/\d\d \d\d:\d\d:\d\d)")
+_LOG_CODE_RE = re.compile(r"Access denied with code (\d+)")
+_LOG_RULE_ID_RE = re.compile(r'\[id "(\d+)"\]')
+_LOG_MSG_RE = re.compile(r'\[msg "([^"]*)"\]')
+_LOG_DATA_RE = re.compile(r'\[data "([^"]*)"\]')
+_LOG_REQUEST_RE = re.compile(r'request: "([^"]*)"')
+
+
+def compact_error_line(line: str) -> str:
+    """Reduce one raw ModSecurity error-log line to its informative fields:
+    time, status code, rule id, message, matched data (if any), request line.
+
+    A raw "Access denied" line is ~350 tokens, most of it constant boilerplate
+    (the CRS file path, version, maturity/accuracy tags, hostname, unique_id)
+    - and for the common final-verdict rule 949110 the `[data ""]` field is
+    empty, so nothing identifying the payload is lost by dropping the rest.
+    Fifty raw lines were ~20k tokens (about 1/6 of an agent run's input, all
+    of it written to the prompt cache) for almost no extra evidence beyond
+    the bypass samples. Lines that aren't ModSecurity blocks (e.g. nginx
+    warnings) are returned unchanged, only stripped.
+    """
+    if "ModSecurity" not in line or "Access denied" not in line:
+        return line.strip()
+    parts = []
+    for regex in (_LOG_TIME_RE, _LOG_CODE_RE):
+        m = regex.search(line)
+        parts.append(m.group(1) if m else "?")
+    rule_id = _LOG_RULE_ID_RE.search(line)
+    msg = _LOG_MSG_RE.search(line)
+    data = _LOG_DATA_RE.search(line)
+    request = _LOG_REQUEST_RE.search(line)
+    out = f"{parts[0]} {parts[1]} id={rule_id.group(1) if rule_id else '?'}"
+    if msg:
+        out += f' msg="{msg.group(1)}"'
+    if data and data.group(1):
+        out += f' data="{data.group(1)}"'
+    if request:
+        out += f" request={request.group(1)}"
+    return out
+
+
 def _extract_family(line: str) -> str:
     """Pull the attack family (e.g. "sqli", "xss") out of a bypass line's
     `_wave_marker` value. Falls back to "unknown" rather than dropping the
@@ -104,12 +187,14 @@ def _extract_family(line: str) -> str:
     return match.group(1) if match else "unknown"
 
 
-def _new_family_samples() -> "defaultdict[str, deque]":
-    """Factory for a fresh per-endpoint family->deque map - a defaultdict so
+def _new_family_samples() -> "defaultdict[str, list]":
+    """Factory for a fresh per-endpoint family->samples map - a defaultdict so
     a newly-seen family at an already-tracked endpoint doesn't need an
-    explicit setdefault at every call site.
+    explicit setdefault at every call site. Plain lists, not bounded deques:
+    capping is done by BreachTracker._add_sample, which has to evict by seed
+    rather than simply dropping the oldest entry.
     """
-    return defaultdict(lambda: deque(maxlen=config.BYPASS_SAMPLE_LIMIT))
+    return defaultdict(list)
 
 
 def _extract_blocked_endpoint(line: str) -> str | None:
@@ -120,15 +205,21 @@ def _extract_blocked_endpoint(line: str) -> str | None:
     """
     if "ModSecurity" not in line or "Access denied" not in line:
         return None
+    # Requests sent by core/rule_verifier.py carry `_replay=1`. Unlike the
+    # access/audit paths (which only count `_wave_marker` traffic), this
+    # function counts *every* block, so without this a verification run would
+    # inflate blocked_counts with the agent's own test traffic.
+    if "_replay=1" in line:
+        return None
     match = _ERROR_LINE_RE.search(line)
     if not match:
         return None
     return match.group(1).split("?", 1)[0]
 
 
-def _extract_audit_sample(line: str) -> tuple[str, str, str] | None:
+def _extract_audit_sample(line: str) -> tuple[str, str, dict] | None:
     """Parse one line of ModSecurity's JSON audit log (one transaction per
-    line - "Serial" format) and return (endpoint, family, sample) for a
+    line - "Serial" format) and return (endpoint, family, sample_dict) for a
     bypass, or None if this line isn't a wave-marked bypass (or doesn't
     parse - a partially-written last line at scan time, for instance).
 
@@ -167,7 +258,16 @@ def _extract_audit_sample(line: str) -> tuple[str, str, str] | None:
         parts.append(f"body: {body[:config.BYPASS_BODY_MAX_CHARS]}")
     if matched_data:
         parts.append("; ".join(matched_data))
-    return endpoint, family, " - ".join(parts)
+    headers = transaction["request"].get("headers") or {}
+    content_type = next((v for k, v in headers.items() if k.lower() == "content-type"), None)
+    sample = _make_sample(
+        " - ".join(parts),
+        method=transaction["request"].get("method"),
+        uri=uri,
+        body=body or None,
+        content_type=content_type,
+    )
+    return endpoint, family, sample
 
 
 def _extract_bypassed_endpoint(line: str) -> str | None:
@@ -195,7 +295,7 @@ def _extract_bypassed_endpoint(line: str) -> str | None:
     match = _ACCESS_LINE_RE.search(line)
     if not match:
         return None
-    path, status = match.groups()
+    _method, path, status = match.groups()
     if status == "403":
         return None
     return path.split("?", 1)[0]
@@ -287,16 +387,14 @@ class BreachTracker:
         if error_stale or access_stale or audit_stale:
             self._blocked_counts: dict[str, int] = defaultdict(int)
             self._bypass_counts: dict[str, int] = defaultdict(int)
-            self._bypass_samples: dict[str, dict[str, deque]] = defaultdict(_new_family_samples)
+            self._bypass_samples: dict[str, dict[str, list]] = defaultdict(_new_family_samples)
         else:
             self._blocked_counts = defaultdict(int, state.get("blocked_counts", {}))
             self._bypass_counts = defaultdict(int, state.get("bypass_counts", {}))
             self._bypass_samples = defaultdict(_new_family_samples)
             for endpoint, families in state.get("bypass_samples", {}).items():
-                for family, lines in families.items():
-                    self._bypass_samples[endpoint][family] = deque(
-                        lines, maxlen=config.BYPASS_SAMPLE_LIMIT
-                    )
+                for family, entries in families.items():
+                    self._bypass_samples[endpoint][family] = [_coerce_sample(e) for e in entries]
 
     @staticmethod
     def _initial_offset(label: str, log_path: Path, saved_offset: int | None) -> tuple[int, bool]:
@@ -372,33 +470,49 @@ class BreachTracker:
         tmp_path.write_text(json.dumps(payload))
         tmp_path.replace(state_path)
 
-    def _add_sample(self, endpoint: str, family: str, sample: str, enrich: bool) -> None:
-        """Add a sample to its (endpoint, family) bucket, keeping one entry
-        per request (identified by its _wave_marker value).
+    def _add_sample(self, endpoint: str, family: str, sample: dict, enrich: bool) -> None:
+        """Add a sample to its (endpoint, family) bucket, with two policies.
 
-        The access log and the audit log both describe the same request; for
-        a POST the access-log line is just a bare URI while the audit entry
-        carries the body. Storing both would waste two of the few sample
-        slots on one request and let the useless one push out a useful one.
-        So: an audit sample (`enrich=True`) replaces any existing sample for
-        its marker, and an access-log line (`enrich=False`) is dropped if the
-        marker already has a sample.
+        **One entry per request** (identified by its _wave_marker value). The
+        access log and the audit log both describe the same request; for a
+        POST the access-log line is just a bare URI while the audit entry
+        carries the body. Storing both would waste slots on one request. So an
+        audit sample (`enrich=True`) replaces any existing sample for its
+        marker, and an access-log line (`enrich=False`) is dropped if the
+        marker already has one.
+
+        **Diversity across seeds, not recency.** A plain "keep the last N"
+        buffer shows the agent whichever mutation family happened to bypass
+        most recently (in a real run, all 5 samples came from one seed while
+        12 other bypasses were invisible), and across multi-wave runs later
+        waves would push out every earlier one. Instead: at most
+        config.BYPASS_SAMPLES_PER_SEED per seed, and when the bucket exceeds
+        config.BYPASS_SAMPLE_LIMIT, evict the oldest sample of whichever seed
+        currently holds the most - so rare seeds survive and common ones get
+        thinned first.
         """
         bucket = self._bypass_samples[endpoint][family]
-        match = _MARKER_RE.search(sample)
-        if match:
-            marker = match.group(0)
-            # Exact comparison of the extracted marker, not a substring test:
-            # "...-02-3" is a substring of "...-02-30".
-            existing = next(
-                (s for s in bucket if (m := _MARKER_RE.search(s)) and m.group(0) == marker),
-                None,
-            )
+        marker = sample["marker"]
+        if marker:
+            # Exact comparison, not a substring test: "...-02-3" is a
+            # substring of "...-02-30".
+            existing = next((s for s in bucket if s["marker"] == marker), None)
             if existing is not None:
                 if not enrich:
                     return
                 bucket.remove(existing)
         bucket.append(sample)
+
+        seed = sample["seed"]
+        same_seed = [s for s in bucket if s["seed"] == seed]
+        while len(same_seed) > config.BYPASS_SAMPLES_PER_SEED:
+            bucket.remove(same_seed.pop(0))
+        while len(bucket) > config.BYPASS_SAMPLE_LIMIT:
+            counts: dict[str, int] = defaultdict(int)
+            for s in bucket:
+                counts[s["seed"]] += 1
+            fullest = max(counts, key=counts.get)
+            bucket.remove(next(s for s in bucket if s["seed"] == fullest))
 
     def poll(self) -> tuple[dict[str, int], dict[str, int]]:
         """Scan any newly appended lines across all three logs, update the
@@ -419,7 +533,15 @@ class BreachTracker:
             if endpoint is not None:
                 self._bypass_counts[endpoint] += 1
                 family = _extract_family(line)
-                self._add_sample(endpoint, family, line.rstrip("\n"), enrich=False)
+                text = line.rstrip("\n")
+                access = _ACCESS_LINE_RE.search(text)
+                method, uri, _status = access.groups()
+                # No body or content-type here (nginx's access log has neither),
+                # so this is only replayable if it is a bodiless GET; a POST
+                # gets upgraded when its audit entry arrives.
+                self._add_sample(
+                    endpoint, family, _make_sample(text, method=method, uri=uri), enrich=False
+                )
 
         # Enrichment only - bypass_counts stays sourced from the access log
         # alone, so counting behavior already proven correct is untouched.
@@ -433,6 +555,15 @@ class BreachTracker:
             self._save_state()
 
         return dict(self._blocked_counts), dict(self._bypass_counts)
+
+    def samples_for(self, endpoint: str) -> list[dict]:
+        """Every structured bypass sample held for `endpoint` (all attack
+        families), after pulling in any newly logged activity. Server-side
+        only - these records carry full request bodies and are what
+        rule_verifier replays; the agent only ever sees their `text`.
+        """
+        self.poll()
+        return [s for entries in self._bypass_samples.get(endpoint, {}).values() for s in entries]
 
     def status(self, endpoint: str | None = None) -> dict:
         """Return the current blocked/bypass tallies plus which endpoints
@@ -448,8 +579,10 @@ class BreachTracker:
         happened, not what it looked like.
         """
         blocked, bypassed = self.poll()
+        # The agent-facing view is just the text of each sample; the structured
+        # fields (method/uri/body) stay server-side for the replay check.
         samples = {
-            ep: {family: list(lines) for family, lines in families.items()}
+            ep: {family: [s["text"] for s in entries] for family, entries in families.items()}
             for ep, families in self._bypass_samples.items()
         }
         if endpoint is not None:

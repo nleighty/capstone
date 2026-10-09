@@ -30,6 +30,15 @@ BREACH_STATE_FILE = os.environ.get(
     "BREACH_STATE_FILE", os.path.join(MCP_SERVER_DIR, "state", "breach_tracker_state.json")
 )
 
+# Where the WAF listens, from the host's point of view - used by
+# core/rule_verifier.py to replay requests through it. Same default as
+# attacker-pipeline/config.py's WAF_BASE_URL (docker-compose.yml publishes 8080).
+WAF_BASE_URL = os.environ.get("WAF_BASE_URL", "http://localhost:8080")
+# Pause after reload_waf() before replaying: `nginx -s reload` returns when the
+# signal is sent, but new workers load the new rules asynchronously.
+VERIFY_SETTLE_SECONDS = float(os.environ.get("VERIFY_SETTLE_SECONDS", 2))
+VERIFY_REQUEST_TIMEOUT = float(os.environ.get("VERIFY_REQUEST_TIMEOUT", 10))
+
 # Matches docker-compose.yml's `container_name: waf`.
 WAF_CONTAINER_NAME = os.environ.get("WAF_CONTAINER_NAME", "waf")
 
@@ -37,13 +46,18 @@ WAF_CONTAINER_NAME = os.environ.get("WAF_CONTAINER_NAME", "waf")
 # Default of 5 matches the example used in docs/design-notes.md.
 BREACH_THRESHOLD = int(os.environ.get("BREACH_THRESHOLD", 5))
 
-# Cap on how many raw bypass lines BreachTracker keeps per (endpoint, attack
-# family) bucket - not per endpoint alone, since one endpoint can see more
-# than one family bypass in the same wave (see core/log_parser.py's module
-# docstring). Small on purpose: this is a representative sample for the
-# defensive agent to read, not an audit log - the exact count already lives
-# in bypass_counts.
-BYPASS_SAMPLE_LIMIT = int(os.environ.get("BYPASS_SAMPLE_LIMIT", 5))
+# How many raw bypass samples BreachTracker keeps per (endpoint, attack
+# family) bucket - per family, not per endpoint alone, since one endpoint can
+# see more than one family bypass in the same wave (see core/log_parser.py's
+# module docstring). The bucket is filled for *diversity across seed payloads*,
+# not recency (BreachTracker._add_sample): at most BYPASS_SAMPLES_PER_SEED from
+# any one seed, and past BYPASS_SAMPLE_LIMIT the most-represented seed is
+# thinned first. This was 5/last-N originally; that showed the agent one
+# mutation family out of many. Each sample is <= ~600 chars, so 20 per bucket
+# is only a few thousand prompt tokens - and the exact count still lives in
+# bypass_counts.
+BYPASS_SAMPLE_LIMIT = int(os.environ.get("BYPASS_SAMPLE_LIMIT", 20))
+BYPASS_SAMPLES_PER_SEED = int(os.environ.get("BYPASS_SAMPLES_PER_SEED", 2))
 
 # Max characters of a bypassing request's body kept in a sample. Samples are
 # sent to the defensive agent's LLM verbatim, so one oversized body would

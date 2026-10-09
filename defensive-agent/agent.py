@@ -62,7 +62,9 @@ async def main() -> None:
         samples = status["sample_bypasses"].get(endpoint, {})
         print(f"\n=== {endpoint} tripped -> rule_id {rule_id} ===")
         try:
-            await graph.run_for_endpoint(react_agent, endpoint, rule_id, samples)
+            await graph.run_for_endpoint(
+                react_agent, endpoint, rule_id, samples, status["bypass_counts"].get(endpoint, 0)
+            )
         except Exception as exc:
             # Don't let one bad endpoint (an Anthropic API error, a
             # docker-exec hiccup) abort the whole dry run - log and move on

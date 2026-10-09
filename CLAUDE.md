@@ -16,7 +16,8 @@ AI-driven attacker and an AI-driven defender:
   breach threshold is crossed reads WAF logs, identifies the mutation pattern, and writes a new
   idempotent WAF rule — via a custom Python MCP server (built on the official `mcp` SDK,
   `mcp-server/`) exposing: `read_waf_logs()`, `get_breach_status()`, `read_current_rule()`,
-  `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()`. Using Claude here (vs. the
+  `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()`, `verify_rule()` (Sprint 4.5: replays
+  recorded bypasses + a benign set against the live WAF). Using Claude here (vs. the
   proposal's default of Ollama/Llama-3 for both sides) is a Sprint 4 decision made with the advisor — see
   `docs/meeting-notes.md`, 2026-09-17 entry — that gives real independence between attacker and
   defender models; the offensive side stays on local Ollama/Llama-3 unchanged.
@@ -35,6 +36,8 @@ LLM since cloud LLMs guardrail against generating exploits).
 3. MCP Server & Defenses — expose logs/rule-writing as MCP tools, threshold tracking ✅ **Sprint 3 done**
 4. Agent Integration & Dry Runs — LangGraph agent wired to MCP tools, idempotent rule IDs
    ✅ **Sprint 4 done** — see `defensive-agent/docs/Sprint4_Summary.md`
+4.5. Inserted clean-up sprint (prompt caching, linting, rule verification, auto-trigger question) —
+   see `defensive-agent/docs/Sprint4.5_Cleanup.md`
 5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
 6. Report finalization, then presentation prep
 
@@ -68,7 +71,8 @@ over this list.
   - `attacker-pipeline/docs/` — sprint summaries, debug notes, and `future-improvements.md`
     (proposed-but-not-yet-built enhancements) specific to this subproject.
 - `mcp-server/` — the defensive MCP server: exposes `read_waf_logs()`, `get_breach_status()`,
-  `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()` as MCP tools over
+  `test_waf_configuration()`, `write_idempotent_rule()`, `reload_waf()`, `verify_rule()`
+  (`core/rule_verifier.py`) as MCP tools over
   streamable-HTTP, plus per-endpoint breach-threshold tracking (`core/log_parser.py`) and an
   operator-only `reset_state.py` for clearing rules/logs between test runs. This is the future
   Sprint 4 defensive agent's tool layer, not the agent itself.
@@ -79,7 +83,8 @@ over this list.
   `rule_id` (`core/rule_registry.py` — code-owned, never left to the LLM, since that's what actually
   makes "static rule IDs" idempotent rather than hoped-for), then hands the LLM the evidence
   (`get_breach_status()`'s `sample_bypasses`, bucketed by attack family) to design and write a rule
-  via `write_idempotent_rule` → `test_waf_configuration` → `reload_waf`. Runs as a single "dry run"
+  via `write_idempotent_rule` → `test_waf_configuration` → `reload_waf` → `verify_rule` (revise if it
+  fails). Runs as a single "dry run"
   pass (`agent.py`), not a polling loop — see `defensive-agent/docs/Sprint4_Summary.md`.
   - `defensive-agent/docs/` — sprint summaries and debug notes specific to this subproject.
 - Future subprojects (automated multi-wave testing / metrics, Sprint 5) will likely land as sibling

@@ -104,11 +104,15 @@ python3 server.py
 Prints a startup line per log noting the offset it's starting from — watch for it, especially a
 "file already has N bytes" warning, which means traffic fired before this start and will be missed.
 
-Exposes 6 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `read_current_rule`,
-`test_waf_configuration`, `write_idempotent_rule`, `reload_waf`. The first 5 are Sprint 3's original
+Exposes 7 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `read_current_rule`,
+`test_waf_configuration`, `write_idempotent_rule`, `reload_waf`, `verify_rule`. The first 5 are Sprint 3's original
 set (see `mcp-server/docs/Sprint3_Summary.md`); `read_current_rule` was added in Sprint 4
 (`defensive-agent/docs/Sprint4_Summary.md`) so the defensive agent can see what it's about to
-overwrite before deciding whether to extend or replace an existing rule.
+overwrite before deciding whether to extend or replace an existing rule. `verify_rule` was added in
+Sprint 4.5 (`defensive-agent/docs/Sprint4.5_Cleanup.md`): after a reload it replays the requests
+recorded as bypasses plus a small benign set through the live WAF. **After pulling a change that
+adds a tool, restart `server.py`** - the agent looks tools up by name and fails if the running
+server predates them.
 
 ## Running the attacker pipeline
 
@@ -154,7 +158,7 @@ rehearsable script built around this client.
 A single "dry run" pass: connects to the MCP server, checks every endpoint via
 `get_breach_status()`, and for any that have tripped the breach threshold, autonomously runs
 `read_waf_logs` (optional context) → `write_idempotent_rule` → `test_waf_configuration` →
-`reload_waf`, printing each step as it happens. Runs once and exits — this is a human-triggered dry
+`reload_waf` → `verify_rule` (revising up to 3 times if it fails), printing each step as it happens. Runs once and exits — this is a human-triggered dry
 run, not a polling loop (see `defensive-agent/docs/Sprint4_Summary.md`). Requires `server.py`
 already running and a wave already fired:
 ```bash

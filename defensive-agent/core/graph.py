@@ -29,6 +29,7 @@ REACT_TOOL_NAMES = (
     "write_idempotent_rule",
     "test_waf_configuration",
     "reload_waf",
+    "verify_rule",
 )
 
 SYSTEM_PROMPT = """You are the defensive half of an adaptive WAF security system.
@@ -72,9 +73,26 @@ duplicate.
 5. Call test_waf_configuration. If it reports failure, revise attack_pattern and call \
 write_idempotent_rule again with the same rule_id, then re-test.
 6. Only once a test reports success, call reload_waf.
+7. Then call verify_rule with your endpoint. test_waf_configuration only proves the config parses - \
+verify_rule is the only check that the rule actually works. It replays the bypassing requests \
+recorded for this endpoint through the live WAF and also sends a few ordinary requests. Read both \
+lists in its result:
+   - attack_replay.still_bypassing: recorded attacks your rule failed to block. Work out why each \
+slipped past (an encoding you didn't anticipate, an anchor that's too strict) and widen the regex.
+   - benign_check.falsely_blocked: ordinary requests your rule now blocks. Your regex is too broad - \
+narrow it. A false positive on legitimate traffic is worse than a missed attack, so when the two \
+conflict, favor not blocking benign traffic.
+   If the verdict is not PASS, revise attack_pattern and repeat steps 4-7 with the same rule_id, up to \
+3 verify_rule attempts in total, then stop and report what remains.
+8. Some recorded "bypasses" are not attacks at all (e.g. a request whose entire payload is a single \
+character like "["): the WAF correctly let them through. If a still_bypassing entry looks like \
+ordinary input, do not write a rule to block it - say so in your final summary instead. In your \
+final summary also state the last verify_rule verdict honestly; passing means the rule covers the \
+evidence it was written from, not that it covers variants nobody has seen yet.
 
 Always call tools in this order: read_current_rule -> read_waf_logs (optional) -> write -> test -> \
-reload. Never call reload_waf unless the most recent test_waf_configuration reported success."""
+reload -> verify_rule. Never call reload_waf unless the most recent test_waf_configuration reported \
+success. Call verify_rule only after reload_waf - before that the new rule isn't live."""
 
 
 def build_agent(tools_by_name: dict):
@@ -121,7 +139,9 @@ def _format_samples(samples_by_family: dict[str, list[str]]) -> str:
     return "\n\n".join(sections) if sections else "(no bypass samples captured yet)"
 
 
-async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family: dict[str, list[str]]) -> dict:
+async def run_for_endpoint(
+    agent, endpoint: str, rule_id: int, samples_by_family: dict[str, list[str]], bypass_count: int
+) -> dict:
     """Invoke the ReAct agent once for a single tripped endpoint. Each call
     starts a fresh conversation (no shared checkpointer across endpoints or
     runs) - a dry run has no need for multi-turn memory here, and adding one
@@ -137,8 +157,14 @@ async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family
     task = (
         f"Endpoint: {endpoint}\n"
         f"Assigned rule_id: {rule_id} (fixed - use exactly this value, never choose your own)\n"
-        f"Sample bypassing requests, grouped by attack family (raw access-log lines - the payload "
-        f"is in the query string):\n\n{_format_samples(samples_by_family)}\n\nBegin."
+        f"{bypass_count} bypassing requests have been recorded for this endpoint; the "
+        f"{sum(len(v) for v in samples_by_family.values())} below are a representative subset, "
+        f"chosen to cover as many distinct attack variants as possible (not the most recent), so "
+        f"other variants of the same kinds likely exist - generalize rather than match only "
+        f"these.\n"
+        f"Sample bypassing requests, grouped by attack family (a request line, plus its body for "
+        f"POSTs - the payload is in the query string or the body):\n\n"
+        f"{_format_samples(samples_by_family)}\n\nBegin."
     )
 
     final_state = None
