@@ -17,3 +17,18 @@ pure "how to run what already exists" reference rather than mixing in a backlog.
   currently in effect, not just the flag descriptions.
 
 ## Investigate the question: What causes bypasses/what are the trends/patterns in the payloads behind them?
+
+## Degenerate mutations counted as "bypasses"
+
+Found 2026-10-09 while verifying Sprint 4.5's body capture: some Llama-3 "variants" are not
+attacks at all - e.g. an XSS seed mutated down to the single character `[` (seen as
+`/rest/products/search?q=[` and a `/api/Feedbacks` body `{"comment": "["}`). The WAF correctly
+lets these through, but `BreachTracker` counts any non-403 wave-marked request as a bypass, so
+they inflate bypass counts, can trip the threshold, and hand the defensive agent "evidence" that
+would only be matched by a rule that breaks benign traffic. Likely also depresses measured
+WAF efficacy and skews alpha (bypass decay) in Sprint 5.
+
+Idea: a validity filter in `core/mutate.py` (or a post-parse step) that drops variants failing a
+cheap sanity check - e.g. still contains a SQL keyword / tag / event-handler token, minimum
+length, or round-trips through a known-malicious oracle such as a one-off request to an
+unprotected Juice Shop. Log how many variants were rejected so mutation quality is measurable.

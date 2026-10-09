@@ -29,6 +29,14 @@ services:
       # small local testbed, not production traffic, so logging everything
       # is cheap and closes that gap.
       MODSEC_AUDIT_ENGINE: "On"
+      # The image's default parts (ABIJDEFHZ) omit part C, the request body -
+      # so a POST payload that evaded every CRS rule (no rule fired, hence no
+      # "Matched Data" either) was recorded nowhere at all. Adding C puts the
+      # raw body in the audit log's request.body, giving the defensive agent
+      # the real evidence it otherwise has to guess at. Testbed-only: this
+      # also logs credentials in login bodies, which production would need to
+      # redact or scope to attack-flagged requests.
+      MODSEC_AUDIT_LOG_PARTS: "ABCDEFHIJZ"
     volumes:
       - ./modsec-rules/ai_generated_rules.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
       - ./logs:/var/log/waf-logs

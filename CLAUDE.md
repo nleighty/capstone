@@ -136,3 +136,5 @@ waiting for an explicit instruction to do so.
 Keep entries factual and concise — capture *what changed and why*, not a transcript of the
 conversation. If unsure whether something's worth recording, err toward recording it: cheap to
 ignore later, expensive to have lost.
+
+Recommend switching to a different model/effort whenever prudent (specifying the recommended model/effort, of course).

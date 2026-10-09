@@ -88,6 +88,12 @@ _ACCESS_LINE_RE = re.compile(r'"[A-Z]+ (\S+) HTTP/[\d.]+" (\d{3})')
 _FAMILY_RE = re.compile(r"_wave_marker=w\d+-([a-z]+)-")
 
 
+# The full `_wave_marker=<value>` token, used to recognise two log lines as the
+# same request (see BreachTracker._add_sample). The value ends at '&' or a
+# space/quote, none of which appear in a marker.
+_MARKER_RE = re.compile(r"_wave_marker=[\w-]+")
+
+
 def _extract_family(line: str) -> str:
     """Pull the attack family (e.g. "sqli", "xss") out of a bypass line's
     `_wave_marker` value. Falls back to "unknown" rather than dropping the
@@ -150,8 +156,18 @@ def _extract_audit_sample(line: str) -> tuple[str, str, str] | None:
         for m in transaction.get("messages", [])
         if m.get("details", {}).get("data")
     ]
-    sample = f"{uri} - {'; '.join(matched_data)}" if matched_data else uri
-    return endpoint, family, sample
+    # The raw request body (audit-log part C, enabled in docker-compose.yml)
+    # is the only place a POST payload that evaded every CRS rule exists at
+    # all - such a request has no matched data, so without this the sample
+    # would be just the bare URI. Capped so one oversized body can't blow up
+    # the agent's prompt (the samples are sent to the LLM verbatim).
+    body = transaction["request"].get("body")
+    parts = [uri]
+    if body:
+        parts.append(f"body: {body[:config.BYPASS_BODY_MAX_CHARS]}")
+    if matched_data:
+        parts.append("; ".join(matched_data))
+    return endpoint, family, " - ".join(parts)
 
 
 def _extract_bypassed_endpoint(line: str) -> str | None:
@@ -356,6 +372,34 @@ class BreachTracker:
         tmp_path.write_text(json.dumps(payload))
         tmp_path.replace(state_path)
 
+    def _add_sample(self, endpoint: str, family: str, sample: str, enrich: bool) -> None:
+        """Add a sample to its (endpoint, family) bucket, keeping one entry
+        per request (identified by its _wave_marker value).
+
+        The access log and the audit log both describe the same request; for
+        a POST the access-log line is just a bare URI while the audit entry
+        carries the body. Storing both would waste two of the few sample
+        slots on one request and let the useless one push out a useful one.
+        So: an audit sample (`enrich=True`) replaces any existing sample for
+        its marker, and an access-log line (`enrich=False`) is dropped if the
+        marker already has a sample.
+        """
+        bucket = self._bypass_samples[endpoint][family]
+        match = _MARKER_RE.search(sample)
+        if match:
+            marker = match.group(0)
+            # Exact comparison of the extracted marker, not a substring test:
+            # "...-02-3" is a substring of "...-02-30".
+            existing = next(
+                (s for s in bucket if (m := _MARKER_RE.search(s)) and m.group(0) == marker),
+                None,
+            )
+            if existing is not None:
+                if not enrich:
+                    return
+                bucket.remove(existing)
+        bucket.append(sample)
+
     def poll(self) -> tuple[dict[str, int], dict[str, int]]:
         """Scan any newly appended lines across all three logs, update the
         running per-endpoint tallies, persist the result, and return
@@ -375,7 +419,7 @@ class BreachTracker:
             if endpoint is not None:
                 self._bypass_counts[endpoint] += 1
                 family = _extract_family(line)
-                self._bypass_samples[endpoint][family].append(line.rstrip("\n"))
+                self._add_sample(endpoint, family, line.rstrip("\n"), enrich=False)
 
         # Enrichment only - bypass_counts stays sourced from the access log
         # alone, so counting behavior already proven correct is untouched.
@@ -383,7 +427,7 @@ class BreachTracker:
             parsed = _extract_audit_sample(line)
             if parsed is not None:
                 endpoint, family, sample = parsed
-                self._bypass_samples[endpoint][family].append(sample)
+                self._add_sample(endpoint, family, sample, enrich=True)
 
         if new_error_lines or new_access_lines or new_audit_lines:
             self._save_state()

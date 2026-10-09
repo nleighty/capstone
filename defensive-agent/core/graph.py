@@ -18,6 +18,7 @@ its way to correctly every run.
 """
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 import config
@@ -80,9 +81,28 @@ def build_agent(tools_by_name: dict):
     """Compile the ReAct agent, bound to only the tools it's allowed to act
     with (see module docstring for why get_breach_status is excluded).
     """
-    model = ChatAnthropic(model=config.ANTHROPIC_MODEL)
+    # Prompt caching (Anthropic only caches when asked - nothing is cached by
+    # default, which is why the Console showed zero cache activity before this
+    # was added). Two breakpoints, per Anthropic's recommended agent-loop pattern:
+    #  1. Explicit marker on the system prompt block. Render order is
+    #     tools -> system -> messages, so this one marker caches the tool
+    #     definitions AND the system prompt - the part identical across every
+    #     endpoint and every run - as a guaranteed read point.
+    #  2. Top-level automatic cache_control (via model_kwargs), which moves a
+    #     breakpoint to the end of the conversation each turn, so the
+    #     read -> write -> test -> reload loop re-reads its own growing history
+    #     instead of re-paying for it on every tool round-trip.
+    # Both use the default 5-minute TTL: turns within one endpoint are seconds
+    # apart, and endpoints in the same dry run are minutes at most.
+    model = ChatAnthropic(
+        model=config.ANTHROPIC_MODEL,
+        model_kwargs={"cache_control": {"type": "ephemeral"}},
+    )
     react_tools = [tools_by_name[name] for name in REACT_TOOL_NAMES]
-    return create_react_agent(model, tools=react_tools, prompt=SYSTEM_PROMPT)
+    system_message = SystemMessage(
+        content=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+    )
+    return create_react_agent(model, tools=react_tools, prompt=system_message)
 
 
 def _format_samples(samples_by_family: dict[str, list[str]]) -> str:
@@ -145,4 +165,37 @@ async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family
                 print(f"  [{endpoint}] agent: {message.content}")
         printed = len(messages)
 
+    _print_cache_usage(endpoint, final_state)
     return final_state
+
+
+def _print_cache_usage(endpoint: str, final_state: dict) -> None:
+    """Sum token usage across every model call in this run and print the
+    cache breakdown. This is the ground truth for whether prompt caching is
+    working (the Anthropic Console lags): a healthy run shows cache_read
+    growing on every call after the first. langchain-anthropic reports
+    input_tokens as the TOTAL prompt, with cache reads/writes broken out
+    under input_token_details, so uncached = input - read - creation.
+    """
+    total_in = cache_read = cache_write = total_out = calls = 0
+    for message in final_state["messages"]:
+        usage = getattr(message, "usage_metadata", None)
+        if not usage:
+            continue
+        details = usage.get("input_token_details") or {}
+        calls += 1
+        total_in += usage.get("input_tokens", 0)
+        total_out += usage.get("output_tokens", 0)
+        cache_read += details.get("cache_read", 0)
+        # langchain-anthropic 1.7 reports writes under the per-TTL keys and
+        # leaves "cache_creation" at 0 (confirmed against the live API), so
+        # take whichever is larger rather than trusting one key.
+        cache_write += max(
+            details.get("cache_creation", 0),
+            details.get("ephemeral_5m_input_tokens", 0) + details.get("ephemeral_1h_input_tokens", 0),
+        )
+    print(
+        f"  [{endpoint}] token usage over {calls} model call(s): input={total_in} "
+        f"(cache_read={cache_read}, cache_write={cache_write}, "
+        f"uncached={total_in - cache_read - cache_write}), output={total_out}"
+    )

@@ -45,6 +45,12 @@ BREACH_THRESHOLD = int(os.environ.get("BREACH_THRESHOLD", 5))
 # in bypass_counts.
 BYPASS_SAMPLE_LIMIT = int(os.environ.get("BYPASS_SAMPLE_LIMIT", 5))
 
+# Max characters of a bypassing request's body kept in a sample. Samples are
+# sent to the defensive agent's LLM verbatim, so one oversized body would
+# otherwise inflate every prompt (and its cost). Generous for a SQLi/XSS
+# payload in a login-style JSON body.
+BYPASS_BODY_MAX_CHARS = int(os.environ.get("BYPASS_BODY_MAX_CHARS", 500))
+
 # Custom ModSecurity rule IDs, per the "Scoped Inclusion" pattern
 # (docs/design-notes.md). CRS reserves 900000-999999 for its own rules
 # (confirmed against the real ruleset shipped in owasp/modsecurity-crs, and
