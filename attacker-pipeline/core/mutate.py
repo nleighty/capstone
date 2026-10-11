@@ -6,11 +6,62 @@ variants. Has no concept of "wave size" or metrics — that's the harness's job.
 
 import json
 import re
+from urllib.parse import unquote
 
 import httpx
 import ollama
 
 import config
+
+# Signals that a string is still a recognizable attack of its family, used to
+# drop degenerate "variants" the local model sometimes emits (a lone "[" or
+# "]" leaking out of the line-split JSON fallback, an empty string, a one-token
+# fragment). Those aren't attacks, so the WAF rightly lets them through - but
+# BreachTracker then counts them as bypasses, which inflates bypass_counts,
+# can trip the breach threshold on noise, and feeds the defensive agent
+# "evidence" a correct rule could only match by also breaking benign traffic
+# (see attacker-pipeline/docs/future-improvements.md, and the ~4% degenerate
+# rate found across existing metrics CSVs). The lists stay deliberately broad
+# and include encoded forms, because mutation's whole job is obfuscation -
+# the goal is to reject non-attacks, not to grade attack quality, so anything
+# carrying a plausible attack token survives.
+_SQLI_SIGNALS = re.compile(
+    r"('|\"|`|%27|%22|&#x0*27|&#0*39"          # quote, literal or encoded
+    r"|--|#|/\*|;"                               # comment / statement terminators
+    r"|\bor\b|\band\b|\bunion\b|\bselect\b|\bfrom\b"
+    r"|\bdrop\b|\binsert\b|\bupdate\b|\bdelete\b|\btruncate\b"
+    r"|\border\b|\bsleep\b|\bbenchmark\b|\bwaitfor\b"
+    r"|=|<>|!=)",
+    re.IGNORECASE,
+)
+_XSS_SIGNALS = re.compile(
+    r"(<|>|%3c|%3e|&lt|&gt"                      # angle bracket, literal or encoded
+    r"|\bscript\b|\bimg\b|\bsvg\b|\biframe\b|\bbody\b|\balert\b|\bprompt\b"
+    r"|\bon\w+\s*=|\bon\w+%3d"                   # event handler, e.g. onerror=
+    r"|javascript:|data:text/html|&#)",
+    re.IGNORECASE,
+)
+_FAMILY_SIGNALS = {"sqli": _SQLI_SIGNALS, "xss": _XSS_SIGNALS}
+
+
+def _is_valid_variant(variant: str, attack_type: str) -> bool:
+    """Whether `variant` still looks like a real attack of `attack_type`, as
+    opposed to degenerate model output. Conservative on purpose: it only
+    rejects strings that are too short to be an attack or carry no attack
+    signal at all, so the cost of a false reject is one lost (easily
+    regenerated) variant, while the cost of a false accept is a corrupted
+    bypass metric. The length guard applies to every family; the signal check
+    is skipped for an attack_type the filter doesn't model (so a new family
+    isn't silently gutted by a signal list that was never written for it).
+    """
+    if len(variant.strip()) < config.MIN_VARIANT_LENGTH:
+        return False
+    signals = _FAMILY_SIGNALS.get(attack_type)
+    if signals is None:
+        return True
+    # unquote so a fully URL-encoded variant (a legitimate mutation technique)
+    # isn't rejected just because its signal tokens are percent-escaped.
+    return bool(signals.search(variant) or signals.search(unquote(variant)))
 
 _SYSTEM_PROMPT = (
     "You are a security research tool generating polymorphic variants of a single "
@@ -128,27 +179,40 @@ def generate_variants(seed_payload: str, attack_type: str, n: int) -> list[str]:
         f"seed_payload: {seed_payload}"
     )
 
-    variants = _parse_variants(_safe_generate(prompt))
-
-    # Case-insensitive dedup: the model sometimes repeats a variant with only
-    # a capitalization difference, which isn't a meaningfully distinct mutation.
+    # Case-insensitive dedup (the model sometimes repeats a variant with only
+    # a capitalization difference) combined with the validity filter, so a
+    # degenerate "variant" neither counts toward `n` nor evicts a real one.
+    # rejected is tallied purely so mutation quality is observable in the run
+    # output rather than silently papered over.
     seen = set()
     deduped = []
-    for v in variants:
-        key = v.lower()
-        if key not in seen:
+    rejected = 0
+
+    def _accept(raw_variants: list[str]) -> None:
+        nonlocal rejected
+        for v in raw_variants:
+            key = v.lower()
+            if key in seen:
+                continue
             seen.add(key)
-            deduped.append(v)
+            if _is_valid_variant(v, attack_type):
+                deduped.append(v)
+            else:
+                rejected += 1
+
+    _accept(_parse_variants(_safe_generate(prompt)))
 
     # One retry (not a loop) if we came up short — enough to smooth out an
-    # occasional bad response without risking an unbounded number of calls
-    # to a local model that's already the slowest part of the wave loop.
+    # occasional bad response (now including one thinned by the validity
+    # filter) without risking an unbounded number of calls to a local model
+    # that's already the slowest part of the wave loop.
     if len(deduped) < n:
-        retry_variants = _parse_variants(_safe_generate(prompt))
-        for v in retry_variants:
-            key = v.lower()
-            if key not in seen:
-                seen.add(key)
-                deduped.append(v)
+        _accept(_parse_variants(_safe_generate(prompt)))
+
+    if rejected:
+        print(
+            f"[mutate] {attack_type}: dropped {rejected} degenerate variant(s) "
+            f"for seed {seed_payload!r}, kept {len(deduped)}"
+        )
 
     return deduped

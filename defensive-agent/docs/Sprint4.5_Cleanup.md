@@ -132,7 +132,7 @@ multi-wave runs later waves would evict every earlier one. Changes:
 **B0 verified live (2026-10-09):** 11 login bypasses -> 7 samples across seeds 01/02/03/08 and
 both waves (previously 5 from one seed).
 
-### Step B - replay verification (built; agent run pending)
+### Step B - replay verification (done; see "Second agent run" below for the live result)
 New MCP tool `verify_rule(endpoint)` (`mcp-server/core/rule_verifier.py`), called after
 `reload_waf`. It sends two things through the live WAF and returns a structured report with a
 PASS/FAIL verdict:
@@ -167,7 +167,7 @@ Design decisions:
 Tested standalone against the live WAF with the real saved samples and an empty rules file:
 all 7 login bypasses reproduced their original outcomes (401s, one 500) -> `FAIL: 7 recorded
 bypass(es) still get through`; a synthetic CRS-blocked payload counted as `now_blocked`; all 9
-benign requests (3 endpoints) passed. **Not yet exercised through the agent.**
+benign requests (3 endpoints) passed. (Exercised through the agent in the runs below.)
 
 Observation: 6 of those 7 replayed bypasses return 401 (login failed), not a SQL error - the
 WAF missed them but the injection didn't actually work against Juice Shop. "Bypass" means "the
@@ -267,3 +267,70 @@ one-line-per-rule format). Verified with `nginx -t` on three previously-fatal de
   added after seeing the first rule fail them, and the agent then iterated against them. Fine
   as a safety net; Sprint 5's RFPR must use a fresh, harness-owned set.
 - Replays do not leak into the tracker (blocked/bypass counts identical before/after).
+
+### Regression tests (added 2026-10-11)
+Everything above was originally checked with throwaway scripts that no longer exist; the repo
+now has `mcp-server/tests/` (stdlib `unittest`, 17 tests, fully offline - temp files, network
+call stubbed): sample selection (per-seed cap, total cap, exact marker match), access/audit
+merge, 403 handling, body cap vs full replay body, legacy state, replay-traffic exclusion,
+`compact_error_line`, rule-writer sanitizing/idempotency, `_retag`, and verify()'s decision
+logic. Run from `mcp-server/`: `python -m unittest discover -s tests -t .`. Mutation-checked:
+reverting the `%` fix, the `_replay` exclusion, or the all-endpoints benign guard each makes a
+test fail. Not covered (needs the live stack): whether a rule actually blocks; the real
+`nginx -t` / reload; MCP transport.
+
+---
+
+## Known limitations register - what is and isn't resolved by planned work
+
+Raised by "does future work fix these, or are they gone?" Short answer: none disappear. Each is
+either fixed by a named piece of future work *if that work is built to cover it*, or is an
+accepted limitation to disclose in the report.
+
+| # | Limitation | Disposition | Owner / where |
+|---|---|---|---|
+| 1 | `verify_rule` PASS = rule fits its own evidence, not unseen variants | Inherent to the tool; **measured, not fixed**, by RGI. Requires the harness to fire variants the agent never saw, *after* the rule is live (e.g. wave N+1) | Sprint 5 design item - not automatic |
+| 2 | Benign set is small (12) and 3 cases were added after a rule failed them, then iterated against | Safety net only. **Sprint 5 RFPR must use a fresh, harness-owned 50-100 request set**; never reuse these | Sprint 5 requirement (design-notes.md RFPR already says 50-100) |
+| 3 | Custom rules run *after* CRS blocking evaluation, so a CRS block says nothing about the agent's rule | **Data already captured** - the attacker CSV's `matched_rule_id` records the attributing rule per request (all 254 existing blocks = CRS `949110`; a custom-rule block shows `1000000`+). Remaining work is a Sprint 5 *analysis* requirement: credit by `matched_rule_id`, don't count raw 403s. No code fix needed now | Sprint 5 analysis requirement |
+| 4 | Degenerate mutations (e.g. lone `[`) counted as bypasses | ✅ **Fixed (2026-10-11)**: `core/mutate.py` validity filter drops no-signal / too-short variants before firing. Verified it removes the 15 junk rows in existing CSVs and keeps genuine obfuscated variants. Tests in `attacker-pipeline/tests/` | Done this sprint |
+| 5 | "Bypass" = any non-403, even when the exploit didn't work (6 of 7 login replays were 401) | Accepted, by design (design-notes.md). Interpret alpha as WAF-miss rate, not exploit-success rate | Report wording |
+| 6 | Rules are global, not per-endpoint | Decided: keep global + all-endpoint benign guard. Revisit if RGI suggests otherwise | Sprint 5 review |
+| 7 | Audit log (part C) records request bodies incl. credentials | Testbed-only; production would redact/scope | Report wording |
+| 8 | Agent may trade attack coverage for benign-safety (it narrowed the quote+`;`/`#` branch) | Intended priority; the cost is visible only through RGI / later waves | Sprint 5 |
+| 9 | Live checks need the stack up (Docker Desktop WSL integration, `server.py`, Ollama) | Operational; after any WSL restart, restart Docker Desktop + server | common-commands.md |
+
+### Superseded text elsewhere (flagged, not edited - your call)
+- `defensive-agent/docs/Sprint4_Summary.md` (~line 49) and `mcp-server/docs/Sprint3_Summary.md`
+  (~line 114) describe `BYPASS_SAMPLE_LIMIT` as default 5 / "rolling" - superseded by Sprint 4.5
+  step B0 (20 per bucket, diversity-based).
+
+## Caveat-fix pass (2026-10-11): #4 fixed in code, #3 confirmed already-captured
+
+Prompted by "do the fixes for the caveats". Of the nine register items only #4 was a clean
+in-scope code fix; the rest are measured by Sprint 5 components (RGI/RFPR), accepted, or report
+wording.
+
+**#4 — degenerate-mutation filter (attacker-pipeline).** `core/mutate.py` gained
+`_is_valid_variant(variant, attack_type)`, applied in `generate_variants` after parse+dedup and
+before the short-count retry, so junk neither counts toward `n` nor evicts a real variant.
+Rule: drop if `len(strip) < config.MIN_VARIANT_LENGTH` (default 4) or no family attack-signal
+(broad literal+encoded SQLi / XSS token regexes; `unquote` pass so fully URL-encoded mutations
+pass). Per-seed reject count printed. Empirical check on existing CSVs: 15 true-junk rows
+(lone `[`/`]`) dropped, every obfuscated variant kept — so the earlier loose "21%/82 suspicious"
+estimate overcounted; true junk is ~4%. New config: `MIN_VARIANT_LENGTH`.
+
+**#3 — CRS-vs-custom attribution.** No code change: the attacker CSV already records
+`matched_rule_id` per block (confirmed: all existing blocks are CRS `949110`; a custom-rule
+block would record its `1000000`+ id, because custom rules load in
+`RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf`, i.e. only reached when CRS didn't already deny).
+The data to attribute correctly exists; Sprint 5's metric code must *use* it (credit by rule id,
+not raw 403 count). Logged as a Sprint 5 analysis requirement in the register above.
+
+**Tests added:** `attacker-pipeline/tests/test_mutate_filter.py` (7 tests, offline, model call
+stubbed). Both suites green: mcp-server 17, attacker-pipeline 7. Each mutation-checked (disabling
+the filter fails 2 tests).
+
+**Process note:** during this pass a `git checkout -- core/mutate.py` (meant to revert a
+throwaway sed mutation) wiped the *uncommitted* filter edits too and had to be re-applied.
+Mutation checks now use copy-to-scratchpad + copy-back, never `git checkout`, while work is
+uncommitted.

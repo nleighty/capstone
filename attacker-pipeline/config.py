@@ -18,6 +18,13 @@ WAVE_SIZE = int(os.environ.get("WAVE_SIZE", 50))
 NUM_WAVES = int(os.environ.get("NUM_WAVES", 5))
 WAVE_PAUSE_SECONDS = int(os.environ.get("WAVE_PAUSE_SECONDS", 60))
 
+# Shortest string core.mutate will accept as a real attack variant. Below this
+# a "variant" is degenerate model output (a lone "[" from the line-split JSON
+# fallback, an empty string), not an attack — see core/mutate.py's validity
+# filter. The shortest genuine seed-derived payloads (e.g. "<svg>", "' OR 1=1")
+# clear this comfortably.
+MIN_VARIANT_LENGTH = int(os.environ.get("MIN_VARIANT_LENGTH", 4))
+
 # Paths anchored to this file's location, not cwd, so the pipeline works
 # regardless of where it's invoked from.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

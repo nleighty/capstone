@@ -114,6 +114,33 @@ recorded as bypasses plus a small benign set through the live WAF. **After pulli
 adds a tool, restart `server.py`** - the agent looks tools up by name and fails if the running
 server predates them.
 
+## Running the tests
+
+All test suites are offline — no WAF/Docker/Ollama/network needed (they use temp files and
+stub out the model/HTTP calls) — so they run regardless of whether the stack is up. Each
+subproject has its own venv; run each from its own root (`-t .` sets the import base, which is
+why the `cd` matters). A good run ends in `OK`; a failure prints a `FAIL:`/`ERROR:` block and a
+final `FAILED` line.
+
+MCP server (log parsing, rule writing, rule-verification logic):
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python -m unittest discover -s tests -t .
+```
+Attacker pipeline (the `core/mutate.py` degenerate-variant filter):
+```bash
+cd ~/capstone/attacker-pipeline
+source .venv/bin/activate
+python -m unittest discover -s tests -t .
+```
+To run one test case while iterating, name it by module path, e.g.:
+```bash
+python -m unittest tests.test_rule_writer_and_verifier.Verifier
+```
+These do not prove a rule actually blocks anything — that is what the agent's `verify_rule` tool
+does against the live WAF.
+
 ## Running the attacker pipeline
 
 Fire this only after `server.py` (above) is already running:

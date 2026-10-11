@@ -76,6 +76,8 @@ over this list.
   streamable-HTTP, plus per-endpoint breach-threshold tracking (`core/log_parser.py`) and an
   operator-only `reset_state.py` for clearing rules/logs between test runs. This is the future
   Sprint 4 defensive agent's tool layer, not the agent itself.
+  - `mcp-server/tests/` — offline `unittest` regression tests (run from `mcp-server/`:
+    `python -m unittest discover -s tests -t .`).
   - `mcp-server/docs/` — sprint summaries and debug notes specific to this subproject.
 - `defensive-agent/` — the Sprint 4 defensive "brain": a LangGraph ReAct agent (Claude via
   `langchain-anthropic`) that connects to `mcp-server`'s tools over MCP (`langchain-mcp-adapters`),
