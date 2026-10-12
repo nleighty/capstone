@@ -112,10 +112,11 @@ def build_agent(tools_by_name: dict):
     #     instead of re-paying for it on every tool round-trip.
     # Both use the default 5-minute TTL: turns within one endpoint are seconds
     # apart, and endpoints in the same dry run are minutes at most.
-    model = ChatAnthropic(
-        model=config.ANTHROPIC_MODEL,
-        model_kwargs={"cache_control": {"type": "ephemeral"}},
-    )
+    # pyright/Pylance can't resolve langchain's pydantic field alias, so it
+    # reports `model` as unknown and demands model_name/timeout/stop. The call
+    # is the documented langchain-anthropic API and is exercised live; the
+    # diagnostic is a stub limitation, not a real error, so suppress just it.
+    model = ChatAnthropic(model=config.ANTHROPIC_MODEL, model_kwargs={"cache_control": {"type": "ephemeral"}})  # pyright: ignore[reportCallIssue]
     react_tools = [tools_by_name[name] for name in REACT_TOOL_NAMES]
     system_message = SystemMessage(
         content=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
@@ -191,6 +192,11 @@ async def run_for_endpoint(
                 print(f"  [{endpoint}] agent: {message.content}")
         printed = len(messages)
 
+    # final_state is None only if the stream yielded nothing (no model call
+    # happened at all) - nothing to summarize, and _print_cache_usage would
+    # fail on final_state["messages"]. Return an empty state in that case.
+    if final_state is None:
+        return {}
     _print_cache_usage(endpoint, final_state)
     return final_state
 

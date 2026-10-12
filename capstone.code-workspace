@@ -11,10 +11,19 @@
         {
             "name": "mcp-server",
             "path": "mcp-server"
+        },
+        {
+            "name": "defensive-agent",
+            "path": "defensive-agent"
         }
     ],
     "settings": {
         "python.analysis.typeCheckingMode": "standard",
-        "python.terminal.useEnvFile": true
+        "python.terminal.useEnvFile": true,
+        "python.analysis.diagnosticMode": "workspace",
+        "python.analysis.exclude": [
+            "**/.venv/**",
+            "**/__pycache__/**"
+        ]
     }
 }

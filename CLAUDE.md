@@ -58,6 +58,10 @@ over this list.
   - `docs/demo-walkthrough-mcp.md` — same pattern, for the Sprint 3 defensive MCP server. Written to
     run standalone (no attacker-pipeline dependency) or combined with a wave fired from the other
     walkthrough — see that doc for which to use.
+  - `docs/demo-walkthrough-sprint4.5.md` — advisor-demo run-sheet for the Sprint 4.5 self-verifying
+    defender (the `verify_rule` FAIL→revise→PASS loop, body capture + sample diversity, prompt
+    caching, junk-mutation filter), with a captured transcript as the guaranteed centerpiece and a
+    live run as an optional supplement.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
@@ -89,6 +93,9 @@ over this list.
   fails). Runs as a single "dry run"
   pass (`agent.py`), not a polling loop — see `defensive-agent/docs/Sprint4_Summary.md`.
   - `defensive-agent/docs/` — sprint summaries and debug notes specific to this subproject.
+    - `defensive-agent/docs/transcripts/` — saved verbatim agent-run transcripts kept as demo/
+      reference artifacts (e.g. `sprint4.5-fail-revise-pass.txt`, the FAIL→revise→PASS run the
+      Sprint 4.5 advisor demo walks through).
 - Future subprojects (automated multi-wave testing / metrics, Sprint 5) will likely land as sibling
   directories here, each with their own `docs/` if needed.
 

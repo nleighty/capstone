@@ -511,7 +511,7 @@ class BreachTracker:
             counts: dict[str, int] = defaultdict(int)
             for s in bucket:
                 counts[s["seed"]] += 1
-            fullest = max(counts, key=counts.get)
+            fullest = max(counts, key=lambda seed: counts[seed])
             bucket.remove(next(s for s in bucket if s["seed"] == fullest))
 
     def poll(self) -> tuple[dict[str, int], dict[str, int]]:
@@ -534,14 +534,18 @@ class BreachTracker:
                 self._bypass_counts[endpoint] += 1
                 family = _extract_family(line)
                 text = line.rstrip("\n")
+                # This re-match can't actually fail - _extract_bypassed_endpoint
+                # already matched _ACCESS_LINE_RE on this same line - but guard
+                # it so the type checker (and a future format change) are safe.
                 access = _ACCESS_LINE_RE.search(text)
-                method, uri, _status = access.groups()
-                # No body or content-type here (nginx's access log has neither),
-                # so this is only replayable if it is a bodiless GET; a POST
-                # gets upgraded when its audit entry arrives.
-                self._add_sample(
-                    endpoint, family, _make_sample(text, method=method, uri=uri), enrich=False
-                )
+                if access is not None:
+                    method, uri, _status = access.groups()
+                    # No body or content-type here (nginx's access log has
+                    # neither), so this is only replayable if it's a bodiless
+                    # GET; a POST gets upgraded when its audit entry arrives.
+                    self._add_sample(
+                        endpoint, family, _make_sample(text, method=method, uri=uri), enrich=False
+                    )
 
         # Enrichment only - bypass_counts stays sourced from the access log
         # alone, so counting behavior already proven correct is untouched.

@@ -57,7 +57,7 @@ class Verifier(unittest.TestCase):
         self.assertEqual(out, "/p?q=%27+OR%5Cr%5Cn1%3D1&_replay=1")
         self.assertEqual(rule_verifier._retag("/p"), "/p?_replay=1")
 
-    def _sample(self, text, method="POST", body="{}"):
+    def _sample(self, text, method="POST", body: str | None = "{}"):
         return {"text": text, "method": method, "uri": "/rest/user/login?_wave_marker=w1-sqli-01-1",
                 "body": body, "content_type": "application/json"}
 

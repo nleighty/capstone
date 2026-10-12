@@ -1,3 +1,12 @@
 {
-    "python.analysis.typeCheckingMode": "standard"
+    "python.analysis.typeCheckingMode": "standard",
+    // Analyze every file in the workspace, not just open ones, so the
+    // Problems panel reflects the whole project without opening each file.
+    "python.analysis.diagnosticMode": "workspace",
+    // Keep library code out of the Problems panel - we only want diagnostics
+    // for our own source, not the three per-subproject virtualenvs.
+    "python.analysis.exclude": [
+        "**/.venv/**",
+        "**/__pycache__/**"
+    ]
 }
