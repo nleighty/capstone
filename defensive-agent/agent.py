@@ -17,6 +17,7 @@ Claude, via core/graph.py's ReAct agent - see that module for why.
 
 import asyncio
 import json
+from typing import Any, cast
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -25,7 +26,7 @@ from core import graph
 from core.rule_registry import RuleRegistry
 
 
-def _parse_tool_result(result):
+def _parse_tool_result(result: Any) -> dict:
     """MultiServerMCPClient wraps a dict-returning MCP tool's result as a
     list of content blocks (e.g. [{"type": "text", "text": "<json>"}]), not
     a bare dict - confirmed against the running server, not assumed. Extract
@@ -36,7 +37,11 @@ def _parse_tool_result(result):
         return json.loads(result[0]["text"])
     if isinstance(result, str):
         return json.loads(result)
-    return result
+    # Defensive fallback (not expected in practice): the result already has
+    # some other shape. The contract is a dict, so assert that for the type
+    # checker rather than leak a `list` branch out of the isinstance narrowing
+    # above - behavior is unchanged, the value is returned as-is.
+    return cast(dict, result)
 
 
 async def main() -> None:
@@ -62,7 +67,9 @@ async def main() -> None:
         samples = status["sample_bypasses"].get(endpoint, {})
         print(f"\n=== {endpoint} tripped -> rule_id {rule_id} ===")
         try:
-            await graph.run_for_endpoint(react_agent, endpoint, rule_id, samples)
+            await graph.run_for_endpoint(
+                react_agent, endpoint, rule_id, samples, status["bypass_counts"].get(endpoint, 0)
+            )
         except Exception as exc:
             # Don't let one bad endpoint (an Anthropic API error, a
             # docker-exec hiccup) abort the whole dry run - log and move on

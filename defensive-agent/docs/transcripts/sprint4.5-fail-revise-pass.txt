@@ -1,0 +1,77 @@
+================================================================================
+Sprint 4.5 defensive-agent run — FAIL -> revise -> PASS
+Date: 2026-10-09
+Endpoint: /rest/user/login   Rule ID: 1000000
+================================================================================
+Verbatim transcript of `python3 agent.py` with the existing (over-broad) rule
+1000000 in place, the all-endpoint benign guard, and compact logs. This is the
+guaranteed centerpiece for the advisor demo (see
+docs/demo-walkthrough-sprint4.5.md); a prose summary of this same run is in
+defensive-agent/docs/Sprint4.5_Cleanup.md ("Second agent run").
+
+What to point at:
+  * verify_rule (first call)  -> FAIL: 3 benign request(s) are now blocked
+  * agent narrows the regex, re-writes, re-tests, reloads
+  * verify_rule (second call) -> PASS (7/7 attacks blocked, 0/12 benign blocked)
+  * closing summary: states the trade-off and the fit-not-generalization caveat
+  * final token line: cache_read=142,432 of 159,475 input (~89%) = caching works
+================================================================================
+
+=== /rest/user/login tripped -> rule_id 1000000 ===
+  [/rest/user/login] agent: Endpoint: /rest/user/login
+Assigned rule_id: 1000000 (fixed - use exactly this value, never choose your own)
+11 bypassing requests have been recorded for this endpoint; the 7 below are a representative subset, chosen to cover as many distinct attack variants as possible (not the most recent), so other variants of the same kinds likely exist - generalize rather than match only these.
+Sample bypassing requests, grouped by attack family (a request line, plus its body for POSTs - the payload is in the query string or the body):
+
+[sqli] (7 example(s)):
+  /rest/user/login?_wave_marker=w1-sqli-03-3 - body: {"email": "admin@juice-sh.op&#x27--", "password": "x"}
+  /rest/user/login?_wave_marker=w2-sqli-01-1 - body: {"email": " OR 1=1%20--%20", "password": "x"}
+  /rest/user/login?_wave_marker=w2-sqli-01-2 - body: {"email": " OR 1=1 %2F-- %2F", "password": "x"}
+  /rest/user/login?_wave_marker=w2-sqli-02-1 - body: {"email": " OR '1''='1 ", "password": "x"}
+  /rest/user/login?_wave_marker=w2-sqli-02-2 - body: {"email": " OR  1=1 ", "password": "x"}
+  /rest/user/login?_wave_marker=w2-sqli-08-2 - body: {"email": " OR 1=1;--", "password": "x"}
+  /rest/user/login?_wave_marker=w2-sqli-08-3 - body: {"email": " or 1=1;-- ", "password": "x"}
+
+Begin.
+  [/rest/user/login] -> calling read_current_rule({'rule_id': 1000000})
+  [/rest/user/login] -> calling read_waf_logs({'lines': 40})
+  [/rest/user/login] <- read_current_rule result: [{'type': 'text', 'text': 'SecRule REQUEST_COOKIES|ARGS "@rx (?i)(?:\\bor\\b\\s*(?:%20|\\s)*[\'\\"`]*\\s*\\d+\\s*[\'\\"`]*\\s*=\\s*[\'\\"`]*\\s*\\d+|(?:\'|\\"|`|%27|%2527|&#x0*27;?|&#0*39;?)\\s*(?:%20|%2f|\\s)*(?:--|#|;)|;\\s*(?:%20|\\s)*--|\\bunion\\b[\\s\\S]{0,40}\\bselect\\b|\\b(?:drop|truncate)\\s+table\\b|\\bsleep\\s*\\(|\\bwaitfor\\s+delay\\b)" "id:1000000,phase:2,deny,status:403,msg:\'SQLi auth-bypass / tautology / comment-terminator attempt on /rest/user/login (OR 1=1 variants, quoted equality, encoded quote + --, UNION SELECT, DROP TABLE)\'"', 'id': 'lc_010f2244-a02b-477b-b22b-3a159aa1d37b'}]
+  [/rest/user/login] <- read_waf_logs result: [compact error-log lines omitted here for brevity — 40 CRS 949110 "Inbound Anomaly Score Exceeded" entries across /rest/user/login and /rest/products/search; see Sprint4.5_Cleanup.md for the note that read_waf_logs now returns one compact line per block]
+  [/rest/user/login] -> calling write_idempotent_rule({'rule_id': 1000000, 'attack_pattern': "(?i)(?:\\b(?:or|and)\\b\\s*(?:%20|\\+|\\s)*['\\x22`]*\\s*\\d+\\s*['\\x22`]*\\s*(?:=|%3d)\\s*['\\x22`]*\\s*\\d+|\\b(?:or|and)\\b\\s*(?:%20|\\+|\\s)*['\\x22`]{1,2}\\s*\\w+\\s*['\\x22`]{0,2}\\s*(?:=|%3d)\\s*['\\x22`]{0,2}\\s*\\w+|(?:'|\\x22|`|%27|%2527|&#x0*27;?|&#0*39;?)\\s*(?:%20|%2f|/|\\s)*(?:--|%2d%2d|#|;)|;\\s*(?:%20|\\s)*(?:--|%2d%2d)|\\bunion\\b[\\s\\S]{0,40}\\bselect\\b|\\b(?:drop|truncate)\\s+table\\b|\\bsleep\\s*\\(|\\bwaitfor\\s+delay\\b)", 'description': 'SQLi auth-bypass / tautology / comment-terminator attempt on /rest/user/login (OR 1=1 numeric and quoted tautologies incl. extra whitespace and %20/%2F encodings, quote or HTML-entity quote followed by --/#/;, ;--, UNION SELECT, DROP/TRUNCATE TABLE, SLEEP(), WAITFOR DELAY)'})
+  [/rest/user/login] <- write_idempotent_rule result: [{'type': 'text', 'text': 'Overwrote existing rule id:1000000 in ai_generated_rules.conf.', 'id': 'lc_eaeeb127-943e-471d-9b6c-f8fbd70dee7f'}]
+  [/rest/user/login] -> calling test_waf_configuration({})
+  [/rest/user/login] <- test_waf_configuration result: [{'type': 'text', 'text': 'FAILED\n2026/10/09 20:12:48 [emerg] 30405#30405: "modsecurity_rules_file" directive Rules error. File: /etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf. Line: 1. Column: 753. Expecting a variable, got:  :  %20/%2F encodings, quote or HTML-entity quote followed by --/#/;, ;--, UNION SELECT, DROP/TRUNCATE TABLE, SLEEP(), WAITFOR DELAY)\'" in /etc/nginx/conf.d/modsecurity.conf:2\nnginx: [emerg] "modsecurity_rules_file" directive Rules error. File: /etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf. Line: 1. Column: 753. Expecting a variable, got:  :  %20/%2F encodings, quote or HTML-entity quote followed by --/#/;, ;--, UNION SELECT, DROP/TRUNCATE TABLE, SLEEP(), WAITFOR DELAY)\'" in /etc/nginx/conf.d/modsecurity.conf:2\nnginx: configuration file /etc/nginx/nginx.conf test failed', 'id': 'lc_b1f0b7d8-dafd-445f-9321-ce163004932d'}]
+  [/rest/user/login] -> calling write_idempotent_rule({'rule_id': 1000000, 'attack_pattern': "(?i)(?:\\b(?:or|and)\\b\\s*(?:%20|\\+|\\s)*['\\x22`]*\\s*\\d+\\s*['\\x22`]*\\s*(?:=|%3d)\\s*['\\x22`]*\\s*\\d+|\\b(?:or|and)\\b\\s*(?:%20|\\+|\\s)*['\\x22`]{1,2}\\s*\\w+\\s*['\\x22`]{0,2}\\s*(?:=|%3d)\\s*['\\x22`]{0,2}\\s*\\w+|(?:'|\\x22|`|%27|%2527|&#x0*27;?|&#0*39;?)\\s*(?:%20|%2f|/|\\s)*(?:--|%2d%2d|#|;)|;\\s*(?:%20|\\s)*(?:--|%2d%2d)|\\bunion\\b[\\s\\S]{0,40}\\bselect\\b|\\b(?:drop|truncate)\\s+table\\b|\\bsleep\\s*\\(|\\bwaitfor\\s+delay\\b)", 'description': 'SQLi auth-bypass tautology or comment-terminator attempt on /rest/user/login'})
+  [/rest/user/login] <- write_idempotent_rule result: [{'type': 'text', 'text': 'Overwrote existing rule id:1000000 in ai_generated_rules.conf.', 'id': 'lc_4fd4b632-d962-48dd-b2e6-b84c698652ea'}]
+  [/rest/user/login] -> calling test_waf_configuration({})
+  [/rest/user/login] <- test_waf_configuration result: [{'type': 'text', 'text': 'OK\n2026/10/09 20:13:11 [warn] 30422#30422: "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\nnginx: [warn] "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\n2026/10/09 20:13:11 [notice] 30422#30422: ModSecurity-nginx v1.0.4 (rules loaded inline/local/remote: 0/852/0)\n2026/10/09 20:13:11 [notice] 30422#30422: libmodsecurity3 version 3.0.16\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful', 'id': 'lc_ea579c6b-7bf9-4b8f-a5a3-dce673a8d592'}]
+  [/rest/user/login] -> calling reload_waf({})
+  [/rest/user/login] <- reload_waf result: [{'type': 'text', 'text': 'OK\n2026/10/09 20:13:17 [warn] 30429#30429: "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\nnginx: [warn] "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\n2026/10/09 20:13:17 [notice] 30429#30429: ModSecurity-nginx v1.0.4 (rules loaded inline/local/remote: 0/852/0)\n2026/10/09 20:13:17 [notice] 30429#30429: libmodsecurity3 version 3.0.16\n2026/10/09 20:13:17 [notice] 30429#30429: signal process started', 'id': 'lc_2f34a9d5-c1fa-46b9-bef0-17b7c24765bf'}]
+  [/rest/user/login] -> calling verify_rule({'endpoint': '/rest/user/login'})
+  [/rest/user/login] <- verify_rule result: [{'type': 'text', 'text': '{\n  "endpoint": "/rest/user/login",\n  "attack_replay": {\n    "replayed": 7,\n    "now_blocked": 7,\n    "still_bypassing": [],\n    "not_replayable": 0\n  },\n  "benign_check": {\n    "sent": 12,\n    "falsely_blocked": [\n      {\n        "description": "search with quoted phrase then semicolon",\n        "request": "GET /rest/products/search?q=%27apple%27%3B+juice"\n      },\n      {\n        "description": "feedback with quoted word then semicolon",\n        "request": "POST /api/Feedbacks {\\"comment\\": \\"Fast delivery, great \'service\'; would buy again\\", \\"rating\\": 5, \\"captchaId\\": 0, \\"captcha\\": \\"0\\"}"\n      },\n      {\n        "description": "feedback with quoted word then #",\n        "request": "POST /api/Feedbacks {\\"comment\\": \\"Loved the \'juice\' #1 shop\\", \\"rating\\": 5, \\"captchaId\\": 0, \\"captcha\\": \\"0\\"}"\n      }\n    ],\n    "note": "covers all endpoints - rules apply site-wide, not just to the endpoint being fixed"\n  },\n  "verdict": "FAIL: 3 benign request(s) are now blocked"\n}', 'id': 'lc_70a0fc17-4102-44bd-8b9f-dee62cb54fb2'}]
+  [/rest/user/login] -> calling write_idempotent_rule({'rule_id': 1000000, 'attack_pattern': "(?i)(?:\\b(?:or|and)\\b\\s*(?:%20|\\+|\\s)*['\\x22`]*\\s*\\d+\\s*['\\x22`]*\\s*(?:=|%3d)\\s*['\\x22`]*\\s*\\d+|\\b(?:or|and)\\b\\s*(?:%20|\\+|\\s)*['\\x22`]{1,2}\\s*\\w+\\s*['\\x22`]{0,2}\\s*(?:=|%3d)\\s*['\\x22`]{0,2}\\s*\\w+|(?:'|\\x22|`|%27|%2527|&#x0*27;?|&#0*39;?)\\s*(?:%20|%2f|/|\\s)*(?:--|%2d%2d)|(?:'|\\x22|`|%27|%2527|&#x0*27;?|&#0*39;?)\\s*(?:;|%3b)\\s*(?:%20|\\s)*(?:--|%2d%2d|\\b(?:drop|select|update|delete|insert|union|truncate|exec)\\b)|(?:;|%3b)\\s*(?:%20|\\s)*(?:--|%2d%2d)|(?:'|\\x22|`|%27)\\s*#\\s*$|\\bunion\\b[\\s\\S]{0,40}\\bselect\\b|\\b(?:drop|truncate)\\s+table\\b|\\bsleep\\s*\\(|\\bwaitfor\\s+delay\\b)", 'description': 'SQLi auth-bypass tautology or comment-terminator attempt on /rest/user/login'})
+  [/rest/user/login] <- write_idempotent_rule result: [{'type': 'text', 'text': 'Overwrote existing rule id:1000000 in ai_generated_rules.conf.', 'id': 'lc_0a6ee660-8ff8-46ca-b6b6-884a9eedb0fb'}]
+  [/rest/user/login] -> calling test_waf_configuration({})
+  [/rest/user/login] <- test_waf_configuration result: [{'type': 'text', 'text': 'OK\n2026/10/09 20:13:48 [warn] 30462#30462: "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\nnginx: [warn] "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\n2026/10/09 20:13:48 [notice] 30462#30462: ModSecurity-nginx v1.0.4 (rules loaded inline/local/remote: 0/852/0)\n2026/10/09 20:13:48 [notice] 30462#30462: libmodsecurity3 version 3.0.16\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful', 'id': 'lc_9734f17a-381e-4da2-aab0-477bd84758b9'}]
+  [/rest/user/login] -> calling reload_waf({})
+  [/rest/user/login] <- reload_waf result: [{'type': 'text', 'text': 'OK\n2026/10/09 20:13:52 [warn] 30479#30479: "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\nnginx: [warn] "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\n2026/10/09 20:13:52 [notice] 30479#30479: ModSecurity-nginx v1.0.4 (rules loaded inline/local/remote: 0/852/0)\n2026/10/09 20:13:52 [notice] 30479#30479: libmodsecurity3 version 3.0.16\n2026/10/09 20:13:52 [notice] 30479#30479: signal process started', 'id': 'lc_ee7aa74d-ab53-469d-b5aa-1e0dfaf988ea'}]
+  [/rest/user/login] -> calling verify_rule({'endpoint': '/rest/user/login'})
+  [/rest/user/login] <- verify_rule result: [{'type': 'text', 'text': '{\n  "endpoint": "/rest/user/login",\n  "attack_replay": {\n    "replayed": 7,\n    "now_blocked": 7,\n    "still_bypassing": [],\n    "not_replayable": 0\n  },\n  "benign_check": {\n    "sent": 12,\n    "falsely_blocked": [],\n    "note": "covers all endpoints - rules apply site-wide, not just to the endpoint being fixed"\n  },\n  "verdict": "PASS"\n}', 'id': 'lc_144f06db-64c2-4047-be6c-a338ff3a50ba'}]
+  [/rest/user/login] agent: ## Summary
+
+**Rule 1000000 (`/rest/user/login`) — final verdict: PASS** (7/7 replayed attacks blocked, 0/12 benign requests falsely blocked).
+
+**Starting point:** `read_current_rule` returned an existing rule covering numeric `OR n=n` tautologies, quote/encoded-quote (`%27`, `&#x27;`) followed by a comment token, `;--`, `UNION ... SELECT`, `DROP/TRUNCATE TABLE`, `SLEEP(`, and `WAITFOR DELAY`. I treated all of that as a floor and carried every branch forward — nothing was dropped, even though today's sample only exercised a subset.
+
+**Today's evidence (all one family, sqli — auth bypass on the login body):**
+- `admin@juice-sh.op&#x27--` — HTML-entity quote without trailing `;`, then `--`
+- ` OR 1=1%20--%20`, ` OR 1=1 %2F-- %2F` — URL-encoded whitespace/slash separators
+- ` OR '1''='1 ` — quoted (non-numeric) tautology
+- ` OR  1=1 `, ` OR 1=1;--`, ` or 1=1;-- ` — spacing/case/terminator variants
+
+**What I added:** a quoted-string tautology branch (`OR '1''='1`, `or "a"="a"`), `AND` as well as `OR`, `+`/`%20` as whitespace, `%3d`/`%3b`/`%2d%2d` encodings, and `/` as a separator before a comment.
+
+**False-positive correction:** the first attempt inherited and broadened the "quote followed by `--`, `#` or `;`" branch, which blocked three legitimate requests (`'apple'; juice`, `great 'service'; would buy again`, `'juice' #1 shop`). I narrowed it: a quote may now only trigger on `--`, or on `;` followed by a comment or a SQL keyword (`drop|select|update|delete|insert|union|truncate|exec`), and a bare `#` only at end-of-value. This slightly reduces coverage versus the original rule's blanket quote+`;`/`#` match, but that branch was demonstrably firing on ordinary punctuation — favoring benign traffic is the correct trade.
+
+**Caveats:** two config attempts failed/were revised before passing — the first `test_waf_configuration` failure was caused by punctuation in the rule's `msg` text, not the regex. No non-attack entries appeared in `still_bypassing`. PASS means the rule covers the 7 recorded bypasses and the built-in benign set; obfuscations not present in this evidence (inline `/**/` comment splitting inside the `OR` clause, `||` concatenation, deeper double-encoding) are not guaranteed to be caught.
+  [/rest/user/login] token usage over 12 model call(s): input=159475 (cache_read=142432, cache_write=17019, uncached=24), output=7229

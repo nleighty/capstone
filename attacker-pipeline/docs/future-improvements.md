@@ -17,3 +17,24 @@ pure "how to run what already exists" reference rather than mixing in a backlog.
   currently in effect, not just the flag descriptions.
 
 ## Investigate the question: What causes bypasses/what are the trends/patterns in the payloads behind them?
+
+## ✅ Degenerate mutations counted as "bypasses" — DONE (Sprint 4.5, 2026-10-11)
+
+Found 2026-10-09 while verifying Sprint 4.5's body capture: some Llama-3 "variants" are not
+attacks at all - e.g. an XSS seed mutated down to the single character `[` (seen as
+`/rest/products/search?q=[` and a `/api/Feedbacks` body `{"comment": "["}`). The WAF correctly
+lets these through, but `BreachTracker` counts any non-403 wave-marked request as a bypass, so
+they inflate bypass counts, can trip the threshold, and hand the defensive agent "evidence" that
+would only be matched by a rule that breaks benign traffic. Likely also depresses measured
+WAF efficacy and skews alpha (bypass decay) in Sprint 5.
+
+**Fixed:** `core/mutate.py` now runs a validity filter (`_is_valid_variant`) as a post-parse,
+post-dedup step in `generate_variants`. A variant is dropped if it is shorter than
+`config.MIN_VARIANT_LENGTH` (default 4) or carries no attack signal for its family (broad
+literal-or-encoded token lists, so URL/hex-encoded mutations still pass). Rejected variants are
+counted and printed per seed so mutation quality stays observable. Verified against the existing
+metrics CSVs: drops the 15 true-junk rows (lone `[`/`]`) and keeps every genuinely obfuscated
+variant. The deliberately-broad lists reject *non-attacks*, they do not grade attack quality.
+Regression tests in `attacker-pipeline/tests/test_mutate_filter.py`. The "oracle round-trip"
+idea from the original note was not needed — a token/length check was enough and adds no network
+dependency to the wave loop.

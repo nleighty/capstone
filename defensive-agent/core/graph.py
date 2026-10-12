@@ -18,6 +18,7 @@ its way to correctly every run.
 """
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 import config
@@ -28,6 +29,7 @@ REACT_TOOL_NAMES = (
     "write_idempotent_rule",
     "test_waf_configuration",
     "reload_waf",
+    "verify_rule",
 )
 
 SYSTEM_PROMPT = """You are the defensive half of an adaptive WAF security system.
@@ -71,18 +73,55 @@ duplicate.
 5. Call test_waf_configuration. If it reports failure, revise attack_pattern and call \
 write_idempotent_rule again with the same rule_id, then re-test.
 6. Only once a test reports success, call reload_waf.
+7. Then call verify_rule with your endpoint. test_waf_configuration only proves the config parses - \
+verify_rule is the only check that the rule actually works. It replays the bypassing requests \
+recorded for this endpoint through the live WAF and also sends a few ordinary requests. Read both \
+lists in its result:
+   - attack_replay.still_bypassing: recorded attacks your rule failed to block. Work out why each \
+slipped past (an encoding you didn't anticipate, an anchor that's too strict) and widen the regex.
+   - benign_check.falsely_blocked: ordinary requests your rule now blocks. Your regex is too broad - \
+narrow it. A false positive on legitimate traffic is worse than a missed attack, so when the two \
+conflict, favor not blocking benign traffic.
+   If the verdict is not PASS, revise attack_pattern and repeat steps 4-7 with the same rule_id, up to \
+3 verify_rule attempts in total, then stop and report what remains.
+8. Some recorded "bypasses" are not attacks at all (e.g. a request whose entire payload is a single \
+character like "["): the WAF correctly let them through. If a still_bypassing entry looks like \
+ordinary input, do not write a rule to block it - say so in your final summary instead. In your \
+final summary also state the last verify_rule verdict honestly; passing means the rule covers the \
+evidence it was written from, not that it covers variants nobody has seen yet.
 
 Always call tools in this order: read_current_rule -> read_waf_logs (optional) -> write -> test -> \
-reload. Never call reload_waf unless the most recent test_waf_configuration reported success."""
+reload -> verify_rule. Never call reload_waf unless the most recent test_waf_configuration reported \
+success. Call verify_rule only after reload_waf - before that the new rule isn't live."""
 
 
 def build_agent(tools_by_name: dict):
     """Compile the ReAct agent, bound to only the tools it's allowed to act
     with (see module docstring for why get_breach_status is excluded).
     """
-    model = ChatAnthropic(model=config.ANTHROPIC_MODEL)
+    # Prompt caching (Anthropic only caches when asked - nothing is cached by
+    # default, which is why the Console showed zero cache activity before this
+    # was added). Two breakpoints, per Anthropic's recommended agent-loop pattern:
+    #  1. Explicit marker on the system prompt block. Render order is
+    #     tools -> system -> messages, so this one marker caches the tool
+    #     definitions AND the system prompt - the part identical across every
+    #     endpoint and every run - as a guaranteed read point.
+    #  2. Top-level automatic cache_control (via model_kwargs), which moves a
+    #     breakpoint to the end of the conversation each turn, so the
+    #     read -> write -> test -> reload loop re-reads its own growing history
+    #     instead of re-paying for it on every tool round-trip.
+    # Both use the default 5-minute TTL: turns within one endpoint are seconds
+    # apart, and endpoints in the same dry run are minutes at most.
+    # pyright/Pylance can't resolve langchain's pydantic field alias, so it
+    # reports `model` as unknown and demands model_name/timeout/stop. The call
+    # is the documented langchain-anthropic API and is exercised live; the
+    # diagnostic is a stub limitation, not a real error, so suppress just it.
+    model = ChatAnthropic(model=config.ANTHROPIC_MODEL, model_kwargs={"cache_control": {"type": "ephemeral"}})  # pyright: ignore[reportCallIssue]
     react_tools = [tools_by_name[name] for name in REACT_TOOL_NAMES]
-    return create_react_agent(model, tools=react_tools, prompt=SYSTEM_PROMPT)
+    system_message = SystemMessage(
+        content=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+    )
+    return create_react_agent(model, tools=react_tools, prompt=system_message)
 
 
 def _format_samples(samples_by_family: dict[str, list[str]]) -> str:
@@ -101,7 +140,9 @@ def _format_samples(samples_by_family: dict[str, list[str]]) -> str:
     return "\n\n".join(sections) if sections else "(no bypass samples captured yet)"
 
 
-async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family: dict[str, list[str]]) -> dict:
+async def run_for_endpoint(
+    agent, endpoint: str, rule_id: int, samples_by_family: dict[str, list[str]], bypass_count: int
+) -> dict:
     """Invoke the ReAct agent once for a single tripped endpoint. Each call
     starts a fresh conversation (no shared checkpointer across endpoints or
     runs) - a dry run has no need for multi-turn memory here, and adding one
@@ -117,8 +158,14 @@ async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family
     task = (
         f"Endpoint: {endpoint}\n"
         f"Assigned rule_id: {rule_id} (fixed - use exactly this value, never choose your own)\n"
-        f"Sample bypassing requests, grouped by attack family (raw access-log lines - the payload "
-        f"is in the query string):\n\n{_format_samples(samples_by_family)}\n\nBegin."
+        f"{bypass_count} bypassing requests have been recorded for this endpoint; the "
+        f"{sum(len(v) for v in samples_by_family.values())} below are a representative subset, "
+        f"chosen to cover as many distinct attack variants as possible (not the most recent), so "
+        f"other variants of the same kinds likely exist - generalize rather than match only "
+        f"these.\n"
+        f"Sample bypassing requests, grouped by attack family (a request line, plus its body for "
+        f"POSTs - the payload is in the query string or the body):\n\n"
+        f"{_format_samples(samples_by_family)}\n\nBegin."
     )
 
     final_state = None
@@ -145,4 +192,42 @@ async def run_for_endpoint(agent, endpoint: str, rule_id: int, samples_by_family
                 print(f"  [{endpoint}] agent: {message.content}")
         printed = len(messages)
 
+    # final_state is None only if the stream yielded nothing (no model call
+    # happened at all) - nothing to summarize, and _print_cache_usage would
+    # fail on final_state["messages"]. Return an empty state in that case.
+    if final_state is None:
+        return {}
+    _print_cache_usage(endpoint, final_state)
     return final_state
+
+
+def _print_cache_usage(endpoint: str, final_state: dict) -> None:
+    """Sum token usage across every model call in this run and print the
+    cache breakdown. This is the ground truth for whether prompt caching is
+    working (the Anthropic Console lags): a healthy run shows cache_read
+    growing on every call after the first. langchain-anthropic reports
+    input_tokens as the TOTAL prompt, with cache reads/writes broken out
+    under input_token_details, so uncached = input - read - creation.
+    """
+    total_in = cache_read = cache_write = total_out = calls = 0
+    for message in final_state["messages"]:
+        usage = getattr(message, "usage_metadata", None)
+        if not usage:
+            continue
+        details = usage.get("input_token_details") or {}
+        calls += 1
+        total_in += usage.get("input_tokens", 0)
+        total_out += usage.get("output_tokens", 0)
+        cache_read += details.get("cache_read", 0)
+        # langchain-anthropic 1.7 reports writes under the per-TTL keys and
+        # leaves "cache_creation" at 0 (confirmed against the live API), so
+        # take whichever is larger rather than trusting one key.
+        cache_write += max(
+            details.get("cache_creation", 0),
+            details.get("ephemeral_5m_input_tokens", 0) + details.get("ephemeral_1h_input_tokens", 0),
+        )
+    print(
+        f"  [{endpoint}] token usage over {calls} model call(s): input={total_in} "
+        f"(cache_read={cache_read}, cache_write={cache_write}, "
+        f"uncached={total_in - cache_read - cache_write}), output={total_out}"
+    )

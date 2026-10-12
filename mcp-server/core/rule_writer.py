@@ -62,7 +62,16 @@ def write_rule(rule_id: int, attack_pattern: str, description: str) -> str:
     # Defensive escaping so a stray quote in the LLM-supplied strings can't
     # break the SecRule directive's own quoting.
     safe_pattern = attack_pattern.replace('"', '\\"')
-    safe_description = description.replace("'", "\\'")
+    # ModSecurity expands `%...` macros inside `msg`, and a stray `%` (e.g. the
+    # "%20"/"%27" an agent naturally writes when describing URL-encoding
+    # evasions, or "100%") makes the whole rules file fail to parse -
+    # confirmed empirically against the live WAF's `nginx -t`: only `%`
+    # broke it; commas, parens, `#`, `--` and `;` were all fine. Spell it out
+    # rather than reject, so the rule still gets written with a readable
+    # description. Whitespace is collapsed because a newline would split the
+    # one-line-per-rule format that read_rule/write_rule rely on.
+    safe_description = " ".join(description.replace("%", "percent-").split())
+    safe_description = safe_description.replace("'", "\\'")
     new_line = _RULE_TEMPLATE.format(
         attack_pattern=safe_pattern, rule_id=rule_id, description=safe_description
     )

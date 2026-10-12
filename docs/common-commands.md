@@ -104,11 +104,42 @@ python3 server.py
 Prints a startup line per log noting the offset it's starting from — watch for it, especially a
 "file already has N bytes" warning, which means traffic fired before this start and will be missed.
 
-Exposes 6 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `read_current_rule`,
-`test_waf_configuration`, `write_idempotent_rule`, `reload_waf`. The first 5 are Sprint 3's original
+Exposes 7 tools to any MCP client: `read_waf_logs`, `get_breach_status`, `read_current_rule`,
+`test_waf_configuration`, `write_idempotent_rule`, `reload_waf`, `verify_rule`. The first 5 are Sprint 3's original
 set (see `mcp-server/docs/Sprint3_Summary.md`); `read_current_rule` was added in Sprint 4
 (`defensive-agent/docs/Sprint4_Summary.md`) so the defensive agent can see what it's about to
-overwrite before deciding whether to extend or replace an existing rule.
+overwrite before deciding whether to extend or replace an existing rule. `verify_rule` was added in
+Sprint 4.5 (`defensive-agent/docs/Sprint4.5_Cleanup.md`): after a reload it replays the requests
+recorded as bypasses plus a small benign set through the live WAF. **After pulling a change that
+adds a tool, restart `server.py`** - the agent looks tools up by name and fails if the running
+server predates them.
+
+## Running the tests
+
+All test suites are offline — no WAF/Docker/Ollama/network needed (they use temp files and
+stub out the model/HTTP calls) — so they run regardless of whether the stack is up. Each
+subproject has its own venv; run each from its own root (`-t .` sets the import base, which is
+why the `cd` matters). A good run ends in `OK`; a failure prints a `FAIL:`/`ERROR:` block and a
+final `FAILED` line.
+
+MCP server (log parsing, rule writing, rule-verification logic):
+```bash
+cd ~/capstone/mcp-server
+source .venv/bin/activate
+python -m unittest discover -s tests -t .
+```
+Attacker pipeline (the `core/mutate.py` degenerate-variant filter):
+```bash
+cd ~/capstone/attacker-pipeline
+source .venv/bin/activate
+python -m unittest discover -s tests -t .
+```
+To run one test case while iterating, name it by module path, e.g.:
+```bash
+python -m unittest tests.test_rule_writer_and_verifier.Verifier
+```
+These do not prove a rule actually blocks anything — that is what the agent's `verify_rule` tool
+does against the live WAF.
 
 ## Running the attacker pipeline
 
@@ -154,7 +185,7 @@ rehearsable script built around this client.
 A single "dry run" pass: connects to the MCP server, checks every endpoint via
 `get_breach_status()`, and for any that have tripped the breach threshold, autonomously runs
 `read_waf_logs` (optional context) → `write_idempotent_rule` → `test_waf_configuration` →
-`reload_waf`, printing each step as it happens. Runs once and exits — this is a human-triggered dry
+`reload_waf` → `verify_rule` (revising up to 3 times if it fails), printing each step as it happens. Runs once and exits — this is a human-triggered dry
 run, not a polling loop (see `defensive-agent/docs/Sprint4_Summary.md`). Requires `server.py`
 already running and a wave already fired:
 ```bash
