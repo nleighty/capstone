@@ -59,7 +59,11 @@ class SampleSelection(TrackerCase):
             self.feed("audit", audit_line(f"w1-sqli-08-{i}", f'{{"email":"s8-{i}"}}'))
         for seed in ("02", "05"):
             self.feed("access", access_line(f"w1-sqli-{seed}-1"))
-            self.feed("audit", audit_line(f"w1-sqli-{seed}-1", f'{{"email":"s{seed}"}}'))
+            # value padded past MIN_BYPASS_PAYLOAD_LENGTH so the degeneracy
+            # guard doesn't treat these placeholders as junk (it rightly drops
+            # anything under 4 real chars); still carries the "s02"/"s05" tag
+            # the asserts below look for.
+            self.feed("audit", audit_line(f"w1-sqli-{seed}-1", f'{{"email":"s{seed}-val"}}'))
         status = self.tracker.status(EP)
         texts = status["sample_bypasses"][EP]["sqli"]
         self.assertEqual(status["bypass_counts"][EP], 8)
@@ -145,6 +149,71 @@ class StateAndFilters(TrackerCase):
         self.assertNotIn("[file", out)
         self.assertLess(len(out), len(raw) // 2)
         self.assertEqual(compact_error_line("nginx: [warn] something  "), "nginx: [warn] something")
+
+
+SEARCH_EP = "/rest/products/search"
+
+
+def get_line(query, marker, status=200):
+    """A GET access-log line carrying both a real query payload and the marker,
+    e.g. q=[ -> `GET /rest/products/search?q=[&_wave_marker=... 200`."""
+    uri = f"{SEARCH_EP}?{query}&_wave_marker={marker}"
+    return f'1.1.1.1 - - [x] "GET {uri} HTTP/1.1" {status} 9 "-" "x" "-"\n'
+
+
+class DegenerateBypassGuard(TrackerCase):
+    """Task-2 fix: degenerate llama3 output (the lone "[" class) must not count
+    as a bypass or become agent evidence, independently of the attacker-side
+    pre-fire filter. See core/log_parser._is_degenerate_payload."""
+
+    def test_degenerate_get_query_is_not_counted_or_sampled(self):
+        self.feed("access", get_line("q=[", "w1-xss-01-1"))
+        status = self.tracker.status(SEARCH_EP)
+        self.assertEqual(status["bypass_counts"].get(SEARCH_EP, 0), 0)
+        self.assertEqual(self.tracker._bypass_samples.get(SEARCH_EP, {}).get("xss", []), [])
+
+    def test_real_get_query_is_counted(self):
+        self.feed("access", get_line("q=<script>alert(1)</script>", "w1-xss-02-1"))
+        self.assertEqual(self.tracker.status(SEARCH_EP)["bypass_counts"][SEARCH_EP], 1)
+
+    def test_url_encoded_real_payload_survives_decode(self):
+        # A fully percent-encoded mutation (<script>) must be measured by its
+        # decoded length, not dropped as if it were short.
+        self.feed("access", get_line("q=%3Cscript%3E", "w1-xss-03-1"))
+        self.assertEqual(self.tracker.status(SEARCH_EP)["bypass_counts"][SEARCH_EP], 1)
+
+    def test_url_encoded_junk_is_still_dropped(self):
+        self.feed("access", get_line("q=%5B", "w1-xss-04-1"))  # %5B -> "["
+        self.assertEqual(self.tracker.status(SEARCH_EP)["bypass_counts"].get(SEARCH_EP, 0), 0)
+
+    def test_degenerate_post_body_is_not_sampled(self):
+        # POST body isn't in the access line, so the count still happens (a
+        # documented residual) and a bodiless access entry is recorded, but
+        # the junk body must never become part of the agent's evidence.
+        self.feed("access", access_line("w1-xss-06-1"))
+        self.feed("audit", audit_line("w1-xss-06-1", '{"comment":"["}'))
+        self.tracker.status(EP)
+        bucket = self.tracker._bypass_samples.get(EP, {}).get("xss", [])
+        # No sample carries the junk body - that is the evidence the agent and
+        # verify_rule would otherwise act on. (A bodiless access entry may
+        # remain; it has no payload content to mislead a rule.)
+        self.assertTrue(all(s["body"] is None for s in bucket))
+
+    def test_real_post_body_is_sampled(self):
+        self.feed("access", access_line("w1-sqli-01-1"))
+        self.feed("audit", audit_line("w1-sqli-01-1", '{"email":"\' OR 1=1--"}'))
+        self.tracker.status(EP)
+        self.assertEqual(len(self.tracker._bypass_samples[EP]["sqli"]), 1)
+
+
+class MeaningfulLen(unittest.TestCase):
+    def test_looks_through_json_envelope(self):
+        self.assertEqual(log_parser._meaningful_len('{"comment":"["}'), 1)
+        self.assertEqual(log_parser._meaningful_len('{"email":"\' OR 1=1--"}'), len("' OR 1=1--"))
+
+    def test_non_json_uses_raw_length(self):
+        self.assertEqual(log_parser._meaningful_len("<script>"), 8)
+        self.assertEqual(log_parser._meaningful_len("["), 1)
 
 
 if __name__ == "__main__":

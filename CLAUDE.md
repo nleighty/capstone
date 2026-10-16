@@ -45,6 +45,10 @@ Timeline is agile/subject to change per the proposal — treat sprint summaries 
 over this list.
 
 ## Repo layout
+- `SECURITY.md` (repo root) — the project's trust model: what the lab setup does and does not
+  protect (MCP server is loopback-only with no auth; the `sudo`-to-wipe-logs property is an
+  emergent Docker side effect, not enforced authz), and the minimum security deltas for a shared/
+  prod environment. Written Sprint 4.6; pairs with `docs/sprint-4.6-direction.md` §6.
 - `docs/` — project-wide material: the proposal, diagram, overall milestones, anything that spans
   subprojects.
   - `docs/design-notes.md` — pre-proposal architecture reasoning (threshold tracking approach,
@@ -62,6 +66,11 @@ over this list.
     defender (the `verify_rule` FAIL→revise→PASS loop, body capture + sample diversity, prompt
     caching, junk-mutation filter), with a captured transcript as the guaranteed centerpiece and a
     live run as an optional supplement.
+  - `docs/sprint-4.6-direction.md` — status + advisor-discussion agenda for the
+    `sprint-4.6-refinements` branch: the defender-side degenerate-variant fix (done), bypass-pattern
+    analysis + stronger-payload direction, prompt-injection/MCP-value analysis, production direction,
+    agent-automation options, and the security/trust-model posture. Spans all subprojects; read it
+    for current pre-Sprint-5 thinking.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
