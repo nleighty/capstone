@@ -14,6 +14,19 @@ and #4), then the analysis/direction items. Rationale per section.
 
 ---
 
+> **Branch closed 2026-10-29 — clean stopping point, merged to `main`.** After the end-of-4.6
+> advisor meeting, the next phase is a **manual code-review / understanding sprint** (the student
+> walks the codebase concept → line-by-line) instead of new feature work. Everything below
+> marked ✅ is finished and tested (mcp-server 25/25, attacker-pipeline suite green). The
+> following are **parked, not in progress** — nothing is half-built:
+> - **#1b** stronger payload generation — scoped only, no code.
+> - **#5** harness-driven agent auto-trigger (option (c)) — analyzed only, no code; it was the
+>   planned Sprint 5 step 1 and is the precondition for live MTTM/α measurement.
+> - **#2 residual** — degenerate POST still nudges the bypass *count* (documented below).
+>
+> Whether any of these resume depends on how the review goes; decide with the advisor.
+> The "START HERE" section below reflects the pre-meeting plan and is kept as a record.
+
 ## START HERE — what actually needs doing next
 
 Most of this sprint is *analysis for the advisor meeting*, not work waiting on you. Concretely:
@@ -323,8 +336,7 @@ getting: single-host lab, MCP server localhost-only by design, reset is an opera
 (not agent-reachable), **no authentication or multi-user authz**. Anyone taking it toward a shared
 or exposed host must add: localhost-only enforcement (or auth + TLS on the MCP server), and real
 access control on destructive operations. This is the responsible artifact to add, and it ties
-directly into #4's prod-hardening list. (Proposed as a short `SECURITY.md` / trust-model note —
-not yet written; flag if you want it this sprint.)
+directly into #4's prod-hardening list. (Written: see repo-root `../SECURITY.md`.)
 
 ---
 
