@@ -201,3 +201,14 @@ CSVs land in `attacker-pipeline/metrics/` (gitignored), one per run: `run_<times
 real captures, `run_<label>_<timestamp>.csv` for labeled ones (demo/smoke). The Sprint 2 baseline
 is `run_20260809_140007.csv` (250 payloads, 5 waves — see `attacker-pipeline/docs/Sprint2_Summary.md`
 for the full analysis).
+
+## Analyzing bypass patterns
+
+What got through the WAF, and which obfuscation techniques correlate with bypassing (see
+`docs/sprint-4.6-direction.md` §1):
+
+```bash
+cd ~/capstone/attacker-pipeline
+python3 analyze.py                 # newest CSV in metrics/
+python3 analyze.py metrics/run_20260809_140007.csv   # a specific CSV (or several, merged)
+```

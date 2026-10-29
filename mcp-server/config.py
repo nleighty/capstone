@@ -65,6 +65,20 @@ BYPASS_SAMPLES_PER_SEED = int(os.environ.get("BYPASS_SAMPLES_PER_SEED", 2))
 # payload in a login-style JSON body.
 BYPASS_BODY_MAX_CHARS = int(os.environ.get("BYPASS_BODY_MAX_CHARS", 500))
 
+# Shortest injected payload BreachTracker will treat as a real bypass. Below
+# this, a "variant" is degenerate model output (the lone "[" class of llama3
+# junk - see attacker-pipeline/docs/future-improvements.md), which the WAF
+# rightly lets through but which should not trip the breach threshold or
+# become agent evidence. Mirrors attacker-pipeline/config.py's
+# MIN_VARIANT_LENGTH (which filters the same junk *pre-fire*); this is the
+# independent defender-side guard, so breach accounting stays correct even
+# for junk that reaches the WAF by some path the attacker filter didn't cover
+# (crucially, a real-traffic deployment can't assume a cooperative attacker at
+# all). Deliberately a length test, never a keyword/attack-signal test: see
+# core/log_parser._is_degenerate_payload for why content gating would defeat
+# this project's own premise.
+MIN_BYPASS_PAYLOAD_LENGTH = int(os.environ.get("MIN_BYPASS_PAYLOAD_LENGTH", 4))
+
 # Custom ModSecurity rule IDs, per the "Scoped Inclusion" pattern
 # (docs/design-notes.md). CRS reserves 900000-999999 for its own rules
 # (confirmed against the real ruleset shipped in owasp/modsecurity-crs, and

@@ -16,7 +16,19 @@ pure "how to run what already exists" reference rather than mixing in a backlog.
   so `python run.py --help` shows the actual `WAVE_SIZE`/`NUM_WAVES`/`WAVE_PAUSE_SECONDS` values
   currently in effect, not just the flag descriptions.
 
-## Investigate the question: What causes bypasses/what are the trends/patterns in the payloads behind them?
+## ✅ Investigate: what causes bypasses / what are the trends in the payloads behind them? — ADDRESSED (Sprint 4.6, 2026-10-15)
+
+Built `analyze.py` + `harness/bypass_analysis.py`: offline analysis over the metrics CSVs that
+reports per-family/endpoint bypass rate and, per obfuscation technique, how much more common it
+is among bypasses than blocks ("lift"). Tests in `tests/test_bypass_analysis.py`.
+
+Headline finding on the baseline CSV (250 payloads, 33.6% bypass): bypasses are concentrated in
+SQLi tautologies against the login JSON body (60% bypass) while encoded XSS in the query string is
+almost fully blocked (1.5%). Counterintuitively, "sophisticated" encodings (mixed-case, HTML
+entity, hex/unicode) correlate with being *blocked* (negative lift) - CRS handles them well - while
+short, simple tautologies with inline comments slip through. So "stronger attacks" (the Sprint 4.6
+#1 goal) means smarter *logic-level* evasion, not more encoding. See
+`../../docs/sprint-4.6-direction.md` §1 for the full write-up.
 
 ## ✅ Degenerate mutations counted as "bypasses" — DONE (Sprint 4.5, 2026-10-11)
 

@@ -69,6 +69,7 @@ import re
 import time
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 import config
 
@@ -301,6 +302,75 @@ def _extract_bypassed_endpoint(line: str) -> str | None:
     return path.split("?", 1)[0]
 
 
+def _nonmarker_query_payload(uri: str) -> str | None:
+    """The attacker's payload as it appears in a GET request's query string,
+    with fire.py's `_wave_marker` param removed and percent-encoding decoded.
+
+    Returns None when the URI carries no query payload besides the marker -
+    i.e. a POST (payload lives in the body, not the URI) or a bare marker-only
+    URI - so the caller knows it can't judge degeneracy from the access line
+    and must defer to the audit-log body path. `parse_qsl` percent-decodes for
+    us, so a fully URL-encoded mutation (a legitimate obfuscation technique) is
+    measured by its real decoded length, not its longer escaped form.
+    """
+    query = urlsplit(uri).query
+    if not query:
+        return None
+    values = [v for k, v in parse_qsl(query, keep_blank_values=True) if k != "_wave_marker"]
+    if not values:
+        return None
+    return " ".join(values)
+
+
+def _meaningful_len(payload: str) -> int:
+    """Length of the actual injected content in `payload`, looking through a
+    JSON envelope when there is one. A POST body like `{"comment": "["}` is 15
+    characters but its injected value is one; measuring the raw envelope would
+    let single-character junk slip the triviality guard, so for JSON we take
+    the longest string leaf instead. Falls back to the whole string's stripped
+    length for non-JSON payloads (e.g. a GET query value).
+    """
+    try:
+        parsed = json.loads(payload)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return len(payload.strip())
+
+    strings: list[str] = []
+
+    def _collect(obj) -> None:
+        if isinstance(obj, str):
+            strings.append(obj)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                _collect(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                _collect(v)
+
+    _collect(parsed)
+    if not strings:
+        return len(payload.strip())
+    return max(len(s.strip()) for s in strings)
+
+
+def _is_degenerate_payload(payload: str) -> bool:
+    """Whether `payload` is too trivial to be a real attack - the lone-"["
+    class of degenerate llama3 output (see
+    attacker-pipeline/docs/future-improvements.md and the Sprint 4.5 notes).
+
+    Deliberately a *length/triviality* test, NOT an attack-signal/keyword test.
+    This project's whole premise is that the offensive model emits obfuscated,
+    polymorphic mutations specifically to evade keyword/signature matching (see
+    this module's docstring, lines 34-43). A content-token gate here - "drop
+    anything without a '<script>' or a quote" - would therefore drop exactly
+    the sophisticated, heavily-obfuscated payloads the framework exists to
+    study, misclassifying the ones that matter most as junk. Length is
+    content-agnostic: a 1-character payload is noise regardless of family, so
+    this filters true junk without second-guessing the attacker's evasiveness.
+    """
+    return _meaningful_len(payload) < config.MIN_BYPASS_PAYLOAD_LENGTH
+
+
 class _OffsetLog:
     """One growing log file, scanned incrementally from a given starting byte
     offset: each call to new_lines() reads only bytes appended since the last
@@ -530,30 +600,69 @@ class BreachTracker:
 
         for line in new_access_lines:
             endpoint = _extract_bypassed_endpoint(line)
-            if endpoint is not None:
-                self._bypass_counts[endpoint] += 1
-                family = _extract_family(line)
-                text = line.rstrip("\n")
-                # This re-match can't actually fail - _extract_bypassed_endpoint
-                # already matched _ACCESS_LINE_RE on this same line - but guard
-                # it so the type checker (and a future format change) are safe.
-                access = _ACCESS_LINE_RE.search(text)
-                if access is not None:
-                    method, uri, _status = access.groups()
-                    # No body or content-type here (nginx's access log has
-                    # neither), so this is only replayable if it's a bodiless
-                    # GET; a POST gets upgraded when its audit entry arrives.
-                    self._add_sample(
-                        endpoint, family, _make_sample(text, method=method, uri=uri), enrich=False
-                    )
+            if endpoint is None:
+                continue
+            text = line.rstrip("\n")
+            # This re-match can't actually fail - _extract_bypassed_endpoint
+            # already matched _ACCESS_LINE_RE on this same line - but guard
+            # it so the type checker (and a future format change) are safe.
+            access = _ACCESS_LINE_RE.search(text)
+            method, uri = (access.group(1), access.group(2)) if access else (None, None)
+
+            # Defender-side degeneracy guard: drop a GET whose query payload
+            # collapsed to junk (the lone "[" class) so it neither trips the
+            # breach threshold nor becomes agent evidence. The attacker side
+            # already filters these pre-fire (mutate.py), but re-counting them
+            # here would reintroduce the inflation for any junk that reaches
+            # the WAF by a path the attacker filter didn't cover - and a real-
+            # traffic deployment can't assume a cooperative, self-filtering
+            # attacker at all. POST bodies aren't in the access line, so those
+            # are guarded on the audit path below instead.
+            if uri is not None:
+                payload = _nonmarker_query_payload(uri)
+                if payload is not None and _is_degenerate_payload(payload):
+                    continue
+
+            self._bypass_counts[endpoint] += 1
+            family = _extract_family(line)
+            if access is not None:
+                # No body or content-type here (nginx's access log has
+                # neither), so this is only replayable if it's a bodiless
+                # GET; a POST gets upgraded when its audit entry arrives.
+                self._add_sample(
+                    endpoint, family, _make_sample(text, method=method, uri=uri), enrich=False
+                )
 
         # Enrichment only - bypass_counts stays sourced from the access log
         # alone, so counting behavior already proven correct is untouched.
         for line in new_audit_lines:
             parsed = _extract_audit_sample(line)
-            if parsed is not None:
-                endpoint, family, sample = parsed
-                self._add_sample(endpoint, family, sample, enrich=True)
+            if parsed is None:
+                continue
+            endpoint, family, sample = parsed
+            # POST-body degeneracy guard: a login/feedback body whose injected
+            # value collapsed to junk (e.g. {"comment": "["}) must not become
+            # a sample the agent writes a rule from - such a rule could only
+            # match benign traffic. The access-log *count* for this same
+            # request already happened above and is not retracted: counts stay
+            # sourced from the access log by design (module docstring), where
+            # the body is invisible, so a junk POST can still nudge the count.
+            # That residual is tracked in the Sprint 4.6 notes; keeping the
+            # junk out of the *evidence* the agent and verify_rule act on is
+            # where it does real harm, and that is fully closed here.
+            body = sample.get("body")
+            if body and _is_degenerate_payload(body):
+                # Junk body (e.g. {"comment": "["}) - don't upgrade the access
+                # sample with it, so the agent never reads "[" as something to
+                # write a rule against. The bodiless access entry recorded
+                # above stays, but it carries no payload content, so it can't
+                # mislead the agent into a rule that hits benign traffic - the
+                # real harm this guard exists to prevent. (The bypass *count*
+                # for this POST also still stands: the body isn't visible on
+                # the access line where counts are sourced - documented
+                # residual in the Sprint 4.6 notes.)
+                continue
+            self._add_sample(endpoint, family, sample, enrich=True)
 
         if new_error_lines or new_access_lines or new_audit_lines:
             self._save_state()

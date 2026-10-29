@@ -38,13 +38,26 @@ LLM since cloud LLMs guardrail against generating exploits).
    ✅ **Sprint 4 done** — see `defensive-agent/docs/Sprint4_Summary.md`
 4.5. Inserted clean-up sprint (prompt caching, linting, rule verification, auto-trigger question) —
    see `defensive-agent/docs/Sprint4.5_Cleanup.md`
-5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR
-6. Report finalization, then presentation prep
+4.6. Refinements & direction (degenerate-variant guard, bypass analyzer, SECURITY.md, prompt-
+   injection/prod/automation analysis) ✅ **closed 2026-10-29** at a clean stopping point and merged
+   to `main` — see `docs/sprint-4.6-direction.md` (top banner lists what's parked).
+**Direction change (2026-10-29, after the end-of-4.6 advisor meeting):** feature work is paused.
+The current phase is a **code-review / understanding sprint**: the student walks the whole system
+concept → line-by-line on `main`, with Claude as tutor, not driver. The student leads execution and
+direction; Claude explains, answers, and quizzes — it should not make code changes or pick next
+steps unprompted during this phase. Any further build work (e.g. the parked agent auto-trigger
+that Sprint 5 metrics depend on) is decided by the student based on how the review goes.
+5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR (⏸ pending the review)
+6. Report finalization, then presentation prep (target: early–mid December 2026)
 
 Timeline is agile/subject to change per the proposal — treat sprint summaries as the source of truth
 over this list.
 
 ## Repo layout
+- `SECURITY.md` (repo root) — the project's trust model: what the lab setup does and does not
+  protect (MCP server is loopback-only with no auth; the `sudo`-to-wipe-logs property is an
+  emergent Docker side effect, not enforced authz), and the minimum security deltas for a shared/
+  prod environment. Written Sprint 4.6; pairs with `docs/sprint-4.6-direction.md` §6.
 - `docs/` — project-wide material: the proposal, diagram, overall milestones, anything that spans
   subprojects.
   - `docs/design-notes.md` — pre-proposal architecture reasoning (threshold tracking approach,
@@ -62,6 +75,11 @@ over this list.
     defender (the `verify_rule` FAIL→revise→PASS loop, body capture + sample diversity, prompt
     caching, junk-mutation filter), with a captured transcript as the guaranteed centerpiece and a
     live run as an optional supplement.
+  - `docs/sprint-4.6-direction.md` — status + advisor-discussion agenda for the
+    `sprint-4.6-refinements` branch: the defender-side degenerate-variant fix (done), bypass-pattern
+    analysis + stronger-payload direction, prompt-injection/MCP-value analysis, production direction,
+    agent-automation options, and the security/trust-model posture. Spans all subprojects; read it
+    for current pre-Sprint-5 thinking.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
