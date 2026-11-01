@@ -2,8 +2,9 @@
 
 **Title:** An Adaptive Defense Framework Against GenAI-Driven Web Payload Polymorphism Using MCP
 **Student:** Nic Leighty | **Advisor:** Jiazhen Zhou | **Semester:** Fall 2026 | **Credits:** 6
-Full proposal: `docs/proposal/Proposal_20260703.pdf` (architecture diagram also at
-`docs/proposal/diagram_20260609.png`).
+Full proposal: `docs/proposal/Proposal_20261004.pdf` (current — Claude on the defensive side;
+architecture diagram also at `docs/proposal/diagram_20261004.png`). The original July versions
+(`Proposal_20260703.pdf`, `diagram_20260609.png`) are kept alongside for history only.
 
 ## What this is
 A self-healing WAF defense framework, orchestrated over MCP, that closes the loop between an
@@ -80,6 +81,10 @@ over this list.
     analysis + stronger-payload direction, prompt-injection/MCP-value analysis, production direction,
     agent-automation options, and the security/trust-model posture. Spans all subprojects; read it
     for current pre-Sprint-5 thinking.
+  - `docs/code-review/` — the post-4.6 code-review/understanding sprint. `README.md` holds the
+    6-step plan, progress table, roles (student leads, Claude tutors), and open advisor items;
+    each step gets its own chat and its own `stepN-<topic>.md` walkthrough notes file. A new
+    review chat should read the README + the previous step's notes first.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.

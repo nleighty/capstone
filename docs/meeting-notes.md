@@ -60,4 +60,29 @@
   1 course formally taken in the Fall.
 - Meet with advisor every 2 weeks; give a progress update each time.
 - Write weekly progress notes in OneNote.
-- Next meeting: Friday, 2026-07-17.
+
+## 2026-10-30 — Post-4.6: how much evaluation is expected?
+
+Question asked (queued in `docs/code-review/README.md`): the proposal promises MTTM/α/RGI/RFPR
+across attack waves, but only the Sprint 2 baseline and the `verify_rule` runs exist — how much
+evaluation is expected? No direct answer on scope; Nic's notes from the meeting, verbatim:
+
+> Basic functionality vs. performance tests
+> Attacks vs functionality--> demonstrate it
+> How to use llama to generate effective attacks? How can we use Claude/MCP to effectively defend
+> the firewall?
+> Performance
+> Direction: model of attacks and changing potential parameters on the llama side and see what
+> happens, predictability of offensive side, knowing each side better-->"you get better, I get better"
+> Iterative
+
+Reading of the notes (an interpretation, not the advisor's words):
+- **Two levels of evaluation:** *basic functionality* (demonstrate that attacks land and the defense
+  responds) first, *performance* second.
+- **Two framing questions for the report:** how to get effective attacks out of Llama, and how to use
+  Claude/MCP to defend effectively.
+- **Suggested direction:** treat it as an iterative attacker-vs-defender process ("you get better, I
+  get better"). Vary parameters on the Llama/attack side, watch how the defense responds, and get a
+  sense of how predictable the offensive side is.
+- The full four-metric multi-wave suite wasn't explicitly required or ruled out. What to build next
+  (if anything) is still Nic's decision during the code-review sprint, but the automation of the MCP client/agent is the important building block to do.
