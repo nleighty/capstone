@@ -40,7 +40,8 @@ duplicate/colliding rules pile up, and eventually Nginx refuses to reload.
 
 Solution (this is what Sprint 1's rule-injection target implements):
 1. Don't let the agent touch the main `modsecurity.conf`. Instead, maintain a separate file,
-   `ai_generated_rules.conf`, included from the main config via a single `Include` directive.
+   `ai_generated_rules.conf`, mounted into the CRS rules folder, where the existing wildcard
+   `Include` loads it.
 2. Every custom rule gets a unique numeric ID, reserved in the `1000000`–`1999999` range. CRS
    itself reserves the `900000`–`999999` block for its own rules (confirmed against the real
    ruleset shipped in `owasp/modsecurity-crs` - rule prefixes 901/905/911/913/920-922/930-934/
@@ -90,7 +91,7 @@ Per-metric implementation notes:
 - **Bypass Decay / RGI** — lives in the offensive script, since it's the one that knows what a
   "wave" is. Fire 50 payloads per wave, track `200 OK` (bypass) vs `403 Forbidden` (blocked). For
   RGI specifically: ModSecurity logs the exact rule ID that blocked a request (e.g. `[id
-  "900001"]"`) — if a Wave 2 attack is blocked by a rule generated in Wave 1, that's an RGI point.
+  "1000000"]"`) — if a Wave 2 attack is blocked by a rule generated in Wave 1, that's an RGI point.
   Pause ~60s between waves to let the agent patch before the next wave fires.
 - **RFPR** — lives in the test harness as a post-deployment hook. Maintain a fixed set of 50–100
   legitimate benign requests (browse home page, add to cart, normal login, etc.). Whenever the

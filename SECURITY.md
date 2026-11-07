@@ -21,7 +21,7 @@ a shared or network-exposed host.**
 
 | Asset | Protection | Nature of the protection |
 |-------|-----------|--------------------------|
-| WAF logs (wiping) | `reset_state.py` needs `sudo` to truncate them | **Emergent** — logs are owned by root because the WAF container writes them to a root-owned bind-mount, not a deliberate authz control. A non-root user genuinely can't wipe them, but that's a side effect of Docker, not a policy. |
+| WAF logs (wiping) | `reset_state.py` needs `sudo` to truncate them | **Emergent and partial** — the WAF container's `nginx` user (uid 101) creates the logs with mode 644, so a different non-root host user can't truncate them. (The host shows uid 101 under whatever name it maps to, e.g. `systemd-resolve`.) This is a side effect of Docker, not a policy, and it isn't tamper protection: `waf-defense/logs/` is mode 777 so the container can write there, which means any local user can delete or replace the files without `sudo`. |
 | Agent erasing its own rules | `reset_state.py` is deliberately **not** an MCP tool | **By design** — the agent's tool set excludes destructive reset, so it can't erase prior rules (which Sprint 5's RGI metric depends on staying in place). This is a real, intentional control. |
 | What the defensive agent can do | The MCP tool list is the agent's entire authority | **By design** — least privilege. Even a jailbroken/prompt-injected model can only read logs and write a rule in the reserved ID range, test, reload, verify. See `docs/sprint-4.6-direction.md` §3. |
 | Rule identity/idempotency | `rule_id` assigned by code (`defensive-agent/core/rule_registry.py`), never by the LLM | **By design.** |
@@ -34,9 +34,14 @@ a shared or network-exposed host.**
   on a single trusted host; **not** fine if the server is ever bound to a non-loopback interface or
   the host is shared. A cloner who changes `MCP_HOST` to `0.0.0.0` removes the only boundary.
 - **No access control on `reset_state.py` itself.** The `sudo` requirement is only as strong as
-  the host's sudoers config, and nothing stops any user who *can* run it from doing so. The "logs
-  need sudo to wipe" property carries over (it comes from the Docker bind-mount), but it is not a
-  substitute for real authz.
+  the host's sudoers config, and nothing stops any user who *can* run it from doing so. `sudo` is
+  only needed to truncate the logs in place; the folder's 777 mode lets any local user delete them
+  without it, so this is not a substitute for real authz.
+- **The WAF port is published on all network interfaces.** `docker-compose.yml` publishes
+  `"8080:8080"`, which Docker binds to `0.0.0.0` and `::`, not loopback. The "closed loop" above
+  therefore depends on the host's firewall: Juice Shop is deliberately vulnerable, and known
+  payloads get past the WAF. Reachability from another machine hasn't been tested. Left as is for
+  the lab (decision 2026-11-06); `"127.0.0.1:8080:8080"` would limit it to the local host.
 - **Secrets.** The defensive agent's Anthropic API key lives in `defensive-agent/.env` (gitignored,
   project-scoped on purpose). A cloner must supply their own; don't commit it.
 - **Test-only logging choices.** Audit logging captures full request bodies (including login
@@ -50,7 +55,7 @@ See `docs/sprint-4.6-direction.md` §4 for the fuller roadmap. The minimum secur
 1. Keep the MCP server loopback-only, **or** add authentication + TLS before binding to any
    reachable interface.
 2. Put real access control on destructive operations (rule reset, log truncation) — don't rely on
-   emergent root-ownership.
+   emergent file ownership.
 3. Redact/scope audit-log body capture so credentials aren't logged in the clear.
 4. Deploy AI-generated rules in detection/shadow mode first and gate enforcement on a real
    benign-traffic false-positive check (ties into the RFPR metric).

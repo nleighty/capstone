@@ -125,8 +125,9 @@ reloads. The WAF↔MCP "arrow" is really **shared files + `docker exec`**, not a
 - **Added:** that's the MCP *server*, not the client. The rules file is shared because the MCP
   server on the host *writes* the rule and the WAF in the container has to *load* it; the bind mount
   is how it gets there. Inside the container it's mounted as
-  `RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf` (`docker-compose.yml` line 41), a filename CRS
-  already loads, so nobody has to edit the main config ("Scoped Inclusion", covered in Step 2). Nginx
+  `RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf` (`docker-compose.yml` line 41), inside the rules
+  folder the image already loads with a wildcard, so nobody has to edit the main config ("Scoped
+  Inclusion", covered in Step 2). Nginx
   still needs a reload because it only reads config at startup or reload.
 
 ---

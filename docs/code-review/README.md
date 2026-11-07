@@ -32,8 +32,8 @@ writes up each step's notes. It does not change code or choose next steps on its
 | # | Step | Main material | Status |
 |---|------|---------------|--------|
 | 1 | Concept & architecture | `docs/proposal/Proposal_20261004.pdf` + `diagram_20261004.png` (the current versions; the July files are history only), `docs/design-notes.md`, repo layout in `CLAUDE.md` | ✅ 2026-10-31 — `step1-architecture.md` |
-| 2 | Target + WAF | `waf-defense/docker-compose.yml`, ModSecurity/OWASP CRS basics, SecRule syntax, `waf-defense/modsec-rules/` | ⏳ next |
-| 3 | Attacker pipeline | `attacker-pipeline/`: `payloads/seeds.py` → `core/mutate.py` → `core/fire.py` → `harness/orchestrator.py` → metrics; then `analyze.py` | ◻ |
+| 2 | Target + WAF | `waf-defense/docker-compose.yml`, ModSecurity/OWASP CRS basics, SecRule syntax, `waf-defense/modsec-rules/` | ✅ 2026-11-06 — `step2-waf.md` |
+| 3 | Attacker pipeline | `attacker-pipeline/`: `payloads/seeds.py` → `core/mutate.py` → `core/fire.py` → `harness/orchestrator.py` → metrics; then `analyze.py` | ⏳ next |
 | 4 | MCP server | `mcp-server/server.py`, `core/log_parser.py` (dense; likely several sessions), `rule_writer.py`, `rule_verifier.py`, `waf_control.py`, `reset_state.py` | ◻ |
 | 5 | Defensive agent | `defensive-agent/agent.py`, `core/rule_registry.py`, `core/graph.py` (LangGraph ReAct) | ◻ |
 | 6 | Cross-cutting | `SECURITY.md`, prompt-injection/MCP-value argument, the four metrics (MTTM, α, RGI, RFPR), what's measured vs. not yet | ◻ |
@@ -71,6 +71,11 @@ where its code comes up, and Claude explains any point that isn't clear. Priorit
 
 Suggested effort level: **medium** for most steps; **high** for Step 4's `log_parser.py`, regex-
 heavy WAF rules (Step 2), and the LangGraph flow (Step 5).
+
+## To work out after the review
+
+- **Rule rewrites can lose old coverage without anything noticing** (found in Step 2; Nic wants this
+  treated as a priority). Details and options: `mcp-server/docs/future-improvements.md`.
 
 ## Open items to take to the advisor
 

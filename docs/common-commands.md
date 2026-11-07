@@ -86,9 +86,9 @@ If `server.py` is already running when you do this, stop and restart it afterwar
 the state file at startup, so a reset while it's running won't be picked up until it restarts.
 
 Manual log truncation only, if you don't want the rest of `reset_state.py`'s cleanup (requires
-`sudo` since the container writes these as root via the bind mount):
+`sudo` since the container writes these as its own `nginx` user, uid 101, via the bind mount):
 ```bash
-sudo truncate -s 0 /home/nicle/capstone/waf-defense/logs/access.log /home/nicle/capstone/waf-defense/logs/error.log
+sudo truncate -s 0 /home/nicle/capstone/waf-defense/logs/access.log /home/nicle/capstone/waf-defense/logs/error.log /home/nicle/capstone/waf-defense/logs/modsec_audit.log
 ```
 
 ## Running the MCP server

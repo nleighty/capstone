@@ -32,8 +32,8 @@ def reset() -> None:
     rules_path.write_text("")
     print(f"Cleared {rules_path}")
 
-    # The log files are written by the WAF container as root, so they're not
-    # writable by this user directly (see waf-defense/docs and the existing
+    # The log files are written by the WAF container's nginx user (uid 101), so
+    # they're not writable by this user directly (see waf-defense/docs and the existing
     # manual `sudo truncate` command in docs/common-commands.md). Using
     # `truncate` in place (not delete-and-recreate) matters: nginx holds the
     # file open, so replacing the file rather than truncating it in place

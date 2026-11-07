@@ -31,7 +31,7 @@ Three non-obvious configuration problems came up, all specific to this Docker im
 
 1. **Log path mismatch** — the image's default log locations weren't where we initially mounted; fixed by pointing to the correct paths via the image's supported environment variables.
 2. **File permissions** — the container process couldn't write to our log folder until host-side permissions were opened up.
-3. **Rule file not loading** — the custom rules file was initially mounted to a path ModSecurity doesn't actually read from. Fixed by mounting it to the correct pre-built location the image already includes by default, then confirmed working via a real block test.
+3. **Rule file not loading** — the custom rules file was initially mounted to a path ModSecurity doesn't actually read from. Fixed by mounting it as a `.conf` file in the rules folder the image already loads, then confirmed working via a real block test.
 
 None of these affect the project's design or timeline — they were implementation details specific to this particular Docker image, now documented for future reference.
 

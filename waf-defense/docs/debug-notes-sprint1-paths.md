@@ -23,9 +23,9 @@ Also needed `chmod 777 logs/` on the host — the container process doesn't run 
 
 **Problem:** mounted the file to `/etc/modsecurity.d/ai_generated_rules.conf` (top level) — never included by ModSecurity.
 
-**Root cause:** `/etc/nginx/modsecurity.d/setup.conf` only includes `/etc/modsecurity.d/owasp-crs/rules/*.conf`. Anything outside that folder is ignored.
+**Root cause:** `/etc/modsecurity.d/setup.conf` (the file Nginx loads through `modsecurity_rules_file`) only includes `/etc/modsecurity.d/owasp-crs/rules/*.conf`. Anything outside that folder is ignored.
 
-**Fix:** mount to the pre-wired placeholder file the image already ships and includes by default:
+**Fix:** mount to a `.conf` filename inside that folder, so the existing wildcard loads it. The image only ships a `.example` version of this name. The name sorts last, after CRS's blocking rule:
 
 ```yaml
 volumes:

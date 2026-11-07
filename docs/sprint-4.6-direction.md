@@ -308,14 +308,15 @@ to pull it into 4.6 or treat it as Sprint 5 step 1.
 ## 6. Security posture: `reset_state.py`, log wiping, and portability
 
 **Current state.** `../mcp-server/reset_state.py` truncates the WAF logs with `sudo truncate`
-(the logs are written by the WAF container as **root** on the host bind-mount, so a non-root user
-can't touch them). It clears the rules file and the breach-state file *without* sudo (those are
+(the logs are written by the WAF container's `nginx` user, uid 101, on the host bind-mount, so a
+different non-root user can't truncate them). It clears the rules file and the breach-state file *without* sudo (those are
 owned by the running user).
 
 **Is the posture good?** For a single-host lab, yes, with honest caveats:
-- **Logs aren't wipeable by a non-privileged user** — true, and good. **But** that property is an
-  *emergent side effect of Docker writing logs as root*, not a deliberate access-control policy.
-  It happens to hold; it wasn't designed as an authz control.
+- **Logs can't be truncated by a different non-root user, but they can be deleted.** The first part
+  is an *emergent side effect of the container writing logs as its own user*, not a deliberate
+  access-control policy. The `logs/` folder is mode 777 so the container can write there, which
+  lets any local user delete or replace the files without `sudo`. It isn't tamper protection.
 - `reset_state.py` is intentionally **not** an MCP tool (the agent must never erase its own prior
   rules — that would undermine Sprint 5's RGI). That separation is a real, deliberate control.
 - The **MCP server has no authentication**; it relies entirely on **binding to `127.0.0.1`**
@@ -324,8 +325,8 @@ owned by the running user).
 
 **Does the posture carry over to someone who clones the repo?** **Partly — and the honest answer
 is "not the parts that matter most for a different environment":**
-- The root-owned-logs / sudo-to-wipe property **does** carry over (it comes from the Docker
-  bind-mount ownership, which any cloner reproduces).
+- The container-owned logs / `sudo`-to-truncate behavior **does** carry over (a cloner's container
+  also writes as its own user), along with the caveat that the folder's 777 mode allows deletion.
 - What does **not** carry over as a guarantee: nothing restricts *who* can run `reset_state.py` or
   reach the MCP server beyond the localhost bind. A cloner who exposes the MCP server on a non-
   loopback interface would let any client write WAF rules / reload — no auth stands in the way.

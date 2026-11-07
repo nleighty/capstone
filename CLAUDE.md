@@ -90,7 +90,8 @@ over this list.
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
 - `waf-defense/` — Docker environment (target app + ModSecurity WAF), logging, and the
   rule-injection target the defensive agent will write to.
-  - `waf-defense/docs/` — sprint summaries and debug notes specific to this subproject.
+  - `waf-defense/docs/` — sprint summaries, debug notes, and `future-improvements.md` (known issues
+    left alone for now) specific to this subproject.
 - `attacker-pipeline/` — the offensive pipeline: local Ollama payload mutation (`core/mutate.py`),
   attack firing against the WAF (`core/fire.py`), and the test orchestrator/harness that runs
   attack waves and writes baseline metrics (`harness/`). Seed payloads live in `payloads/seeds.py`;
