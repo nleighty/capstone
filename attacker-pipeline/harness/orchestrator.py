@@ -90,9 +90,10 @@ def run(
             )
 
             if wave_id != num_waves and pause_seconds > 0:
-                # No defensive agent exists yet (Sprint 3-4), so this pause
-                # doesn't currently let anything patch — it's here so the
-                # wave-loop shape is already correct when the agent lands.
+                # The defensive agent exists (Sprint 4) but isn't triggered
+                # automatically between waves yet (parked auto-trigger,
+                # docs/sprint-4.6-direction.md #5c), so this pause doesn't
+                # currently let anything patch unless the agent is run by hand.
                 time.sleep(pause_seconds)
     finally:
         metrics.close()

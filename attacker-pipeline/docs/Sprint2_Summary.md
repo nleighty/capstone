@@ -31,6 +31,9 @@ A new sibling subproject, `attacker-pipeline/`, with a deliberate layer split (m
 - **`payloads/seeds.py`** — 16 hand-curated seeds (8 SQLi, 8 XSS) targeting real Juice Shop
   surfaces: `POST /rest/user/login` (SQLi login-bypass), `GET /rest/products/search?q=` (SQLi/XSS
   reflected), `POST /api/Feedbacks` (persisted XSS).
+  > ⚠️ *Annotated 2026-11-12 (Step 3 review):* only **13** of the 16 seeds were ever fired in the
+  > baseline. `build_wave` truncates in seed order, so `xss-06`/`07`/`08` got 0 rows and `xss-05`
+  > got 2. See `future-improvements.md`, "Balanced seed coverage".
 - **`run.py`** — CLI entrypoint with `--waves`/`--wave-size`/`--pause` overrides for smoke testing.
 
 Ollama itself was installed natively in WSL2 (user's explicit choice over a Dockerized service, for
@@ -59,6 +62,11 @@ target; see the debug notes for details.
 | 3 | 34 | 16 | 32% |
 | 4 | 31 | 19 | 38% |
 | 5 | 32 | 18 | 36% |
+
+> ⚠️ *Annotated 2026-11-12 (Step 3 review):* this run happened before the Sprint 4.5 junk filter
+> existed. Today's filter rejects **13** rows of it (mostly a lone `[`/`]`), and all 13 counted as
+> bypasses. Without them it's **71/237 = 30.0%**. A new baseline will be captured in the
+> Sprint 5 evaluation runs.
 
 Overall: **166/250 blocked (66%), 84/250 bypassed (34%)** — SQLi bypassed roughly half the time
 (81/168), XSS bypassed rarely (3/82). Wave-to-wave variance (20%–42%) reflects the LLM's stochastic

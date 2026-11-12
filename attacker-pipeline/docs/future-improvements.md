@@ -16,6 +16,48 @@ pure "how to run what already exists" reference rather than mixing in a backlog.
   so `python run.py --help` shows the actual `WAVE_SIZE`/`NUM_WAVES`/`WAVE_PAUSE_SECONDS` values
   currently in effect, not just the flag descriptions.
 
+## Balanced seed coverage + guaranteed wave size (planned fix, found 2026-11-12, Step 3 review)
+
+Nic wants this fixed before the Sprint 5 evaluation runs, to cut down on variables.
+
+**Problem 1: uneven seed coverage.** `harness/orchestrator.py:build_wave` asks for
+`ceil(WAVE_SIZE / len(SEEDS))` variants per seed, flattens them **in seed order**, and keeps the
+first `WAVE_SIZE`. Two things make the last seeds lose out: the list has all 8 SQLi seeds first, and
+`generate_variants` often returns *more* than requested (it never trims back down to `n`; the
+baseline has indexes up to 7 when 4 were asked for). Result in `run_baseline_20260809_140007.csv`:
+the 8 SQLi seeds got 15–26 rows each, `xss-05` got 2, and `xss-06`/`07`/`08` got **0**. Only one
+XSS seed (`xss-04`) ever reached `/api/Feedbacks`. The `build_wave` docstring's "roughly even
+coverage" claim is wrong for the same reason.
+
+**Problem 2: wave size isn't guaranteed.** `generate_variants` can also return *fewer* than `n`
+(the junk filter drops output, there's only one retry, and a timeout returns nothing). If too many seeds
+come up short, the wave has fewer than `WAVE_SIZE` payloads, and the docstring's "never short"
+claim doesn't hold. Every baseline wave happened to be 50, but α compares waves, so the size should be fixed.
+
+**Proposed fix (not built):**
+- Trim each seed's variants to `variants_per_seed` and take them **round-robin across seeds**
+  (seed 1 variant 1, seed 2 variant 1, ...), so cutting to `WAVE_SIZE` drops evenly instead of
+  dropping whole seeds at the end of the list. Shuffling the seed order each wave also works.
+- **Top-up loop:** after the first pass, while the wave is short, ask Ollama for more variants from
+  the seeds that came up short, so junk is *replaced* instead of just dropped. This needs a
+  hard cap on extra calls, since a broken model must not hang the run. If it's still short after the cap,
+  log it and record the actual size, rather than failing silently.
+- Rewrite the `build_wave` docstring to match.
+
+## Attacker doesn't learn from results (found 2026-11-12, Step 3 review)
+
+The attacker is open-loop. Every wave sends the same 16 seeds and the same prompt to Llama, and
+nothing about which variants got through or were blocked goes back in. Variation between waves is just
+sampling noise. The advisor's "you get better, I get better" direction (`docs/meeting-notes.md`,
+2026-10-30) needs a feedback path, e.g.:
+- Seed the next wave's prompt with the previous wave's bypasses ("make more like these").
+- Weight seeds toward the families/endpoints that are currently bypassing.
+- Feed `analyze.py`'s lift results back in (techniques with positive lift get used more).
+
+This changes what α measures: a learning attacker against a learning defender, instead of a fixed
+attacker distribution against a learning defender. So it's a design decision to make with the advisor,
+not just a code change.
+
 ## ✅ Investigate: what causes bypasses / what are the trends in the payloads behind them? — ADDRESSED (Sprint 4.6, 2026-10-15)
 
 Built `analyze.py` + `harness/bypass_analysis.py`: offline analysis over the metrics CSVs that
