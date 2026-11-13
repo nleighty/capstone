@@ -127,6 +127,16 @@ def _make_sample(text: str, method: str | None, uri: str | None, body: str | Non
     }
 
 
+def is_replayable(sample: dict) -> bool:
+    """Whether rule_verifier can re-send this sample as the same request: it
+    needs a method and URI, and a POST also needs its body (an access-log-only
+    POST has none - nginx doesn't log bodies - so replaying it would send a
+    different, empty request).
+    """
+    method, uri = sample.get("method"), sample.get("uri")
+    return bool(method and uri and (method == "GET" or sample.get("body") is not None))
+
+
 def _coerce_sample(entry) -> dict:
     """Accept a sample loaded from the persisted state file. Older state
     files stored samples as bare strings; wrap those so a server upgraded
@@ -454,6 +464,23 @@ class BreachTracker:
         # offset that triggered the clamp, so log and tally state can't drift
         # apart from each other.
         if error_stale or access_stale or audit_stale:
+            state = {}
+        # Per-endpoint mitigation bookkeeping (post-review fix, 2026-11-13), set
+        # only by mark_mitigated() when verify_rule reports PASS:
+        # - handled_counts: the endpoint's bypass_count at its last verified
+        #   rule. Tripping is measured from here, not from zero, so an endpoint
+        #   that's already been fixed only trips again on *new* bypasses.
+        #   Without this the threshold was cumulative, and every agent pass
+        #   re-worked every endpoint that had ever tripped, from stale samples.
+        # - protected: every request a verified rule was confirmed to block,
+        #   kept uncapped (unlike the sample buckets) so verify_rule can re-test
+        #   all of them on every later rewrite. That's what catches a rewrite
+        #   that silently drops old coverage.
+        self._handled_counts: dict[str, int] = dict(state.get("handled_counts", {}))
+        self._protected: dict[str, list[dict]] = {
+            ep: list(entries) for ep, entries in state.get("protected", {}).items()
+        }
+        if error_stale or access_stale or audit_stale:
             self._blocked_counts: dict[str, int] = defaultdict(int)
             self._bypass_counts: dict[str, int] = defaultdict(int)
             self._bypass_samples: dict[str, dict[str, list]] = defaultdict(_new_family_samples)
@@ -530,6 +557,8 @@ class BreachTracker:
                 endpoint: {family: list(lines) for family, lines in families.items()}
                 for endpoint, families in self._bypass_samples.items()
             },
+            "handled_counts": self._handled_counts,
+            "protected": self._protected,
         }
         # Write to a temp file and rename over the real one so a crash
         # mid-write can't leave a half-written, unparseable state file behind
@@ -702,12 +731,45 @@ class BreachTracker:
             bypassed = {endpoint: bypassed.get(endpoint, 0)}
             samples = {endpoint: samples.get(endpoint, {})}
 
-        tripped = [ep for ep, count in bypassed.items() if count >= config.BREACH_THRESHOLD]
+        # Trip on bypasses since the endpoint's last verified rule, not on the
+        # all-time total - see __init__'s handled_counts comment.
+        since_rule = {ep: count - self._handled_counts.get(ep, 0) for ep, count in bypassed.items()}
+        tripped = [ep for ep, count in since_rule.items() if count >= config.BREACH_THRESHOLD]
         return {
             "blocked_counts": blocked,
             "bypass_counts": bypassed,
+            "bypasses_since_rule": since_rule,
             "sample_bypasses": samples,
             "threshold": config.BREACH_THRESHOLD,
             "tripped_endpoints": tripped,
             "checked_at": time.time(),
         }
+
+    def mark_mitigated(self, endpoint: str, verified_samples: list[dict]) -> None:
+        """Record that `endpoint` now has a rule that passed verify_rule.
+
+        Called by the verify_rule tool on a PASS verdict, never by the agent
+        directly: the agent can't declare itself done, only the objective
+        check can. Two effects:
+        1. The endpoint's trip counter restarts from its current bypass_count,
+           so it only trips again if new bypasses arrive after this rule.
+        2. Every replayable sample the PASS just confirmed as blocked joins
+           the endpoint's protected list (deduped by marker), so any later
+           rewrite that stops blocking one of them fails verification.
+        """
+        self._handled_counts[endpoint] = self._bypass_counts.get(endpoint, 0)
+        protected = self._protected.setdefault(endpoint, [])
+        known = {s["marker"] for s in protected}
+        for sample in verified_samples:
+            if is_replayable(sample) and sample["marker"] not in known:
+                protected.append(sample)
+                known.add(sample["marker"])
+        self._save_state()
+
+    def protected_samples(self) -> list[dict]:
+        """Every protected request across *all* endpoints. All of them, not
+        just one endpoint's, because rules aren't scoped to a URL: rewriting
+        the login rule could un-block something the search rule's evidence
+        depended on (same reasoning as verify_rule's site-wide benign set).
+        """
+        return [s for entries in self._protected.values() for s in entries]

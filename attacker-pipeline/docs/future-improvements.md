@@ -16,7 +16,9 @@ pure "how to run what already exists" reference rather than mixing in a backlog.
   so `python run.py --help` shows the actual `WAVE_SIZE`/`NUM_WAVES`/`WAVE_PAUSE_SECONDS` values
   currently in effect, not just the flag descriptions.
 
-## Balanced seed coverage + guaranteed wave size (planned fix, found 2026-11-12, Step 3 review)
+## ✅ Balanced seed coverage + guaranteed wave size — DONE (2026-11-13, offline-tested)
+
+Built as proposed (round-robin, rotating start, top-up capped by `WAVE_TOPUP_ROUNDS`, short waves warned). Tests: `tests/test_build_wave.py`. See `../../docs/post-review-fixes.md` §5. The original write-up is kept below.
 
 Nic wants this fixed before the Sprint 5 evaluation runs, to cut down on variables.
 

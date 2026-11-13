@@ -80,6 +80,29 @@ class Verifier(unittest.TestCase):
         self.assertEqual([s["request"] for s in r["attack_replay"]["still_bypassing"]], ["b"])
         self.assertEqual(len(r["benign_check"]["falsely_blocked"]), 1)
 
+    def _verify_with_protected(self, statuses, samples, protected):
+        with mock.patch.object(rule_verifier.time, "sleep"), \
+             mock.patch.object(rule_verifier, "_send", side_effect=statuses):
+            return rule_verifier.verify("/rest/user/login", samples, protected)
+
+    def test_lost_coverage_on_protected_request_fails(self):
+        # Order of _send calls: current samples, then protected, then benign.
+        n_benign = sum(len(v) for v in rule_verifier._BENIGN.values())
+        current = [dict(self._sample("new"), marker="m-new")]
+        protected = [dict(self._sample("old-kept"), marker="m1"), dict(self._sample("old-lost"), marker="m2")]
+        r = self._verify_with_protected([403, 403, 200] + [200] * n_benign, current, protected)
+        self.assertTrue(r["verdict"].startswith("FAIL"))
+        self.assertIn("lost coverage", r["verdict"])
+        self.assertEqual([s["request"] for s in r["coverage_check"]["regressions"]], ["old-lost"])
+        self.assertEqual(r["coverage_check"]["protected_replayed"], 2)
+
+    def test_protected_request_already_in_samples_is_not_sent_twice(self):
+        n_benign = sum(len(v) for v in rule_verifier._BENIGN.values())
+        same = dict(self._sample("a"), marker="m1")
+        r = self._verify_with_protected([403] + [200] * n_benign, [same], [same])
+        self.assertEqual(r["verdict"], "PASS")
+        self.assertEqual(r["coverage_check"]["protected_replayed"], 0)
+
     def test_post_without_body_is_not_replayed(self):
         n_benign = sum(len(v) for v in rule_verifier._BENIGN.values())
         r = self._verify([200] * n_benign, [self._sample("a", body=None)])

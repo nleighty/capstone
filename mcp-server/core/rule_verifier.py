@@ -47,6 +47,7 @@ import urllib.error
 import urllib.request
 
 import config
+from core.log_parser import is_replayable
 
 # Neutral UA: urllib's default ("Python-urllib/x") is the kind of string CRS's
 # scanner-detection rules can flag, which would turn the benign guard into a
@@ -119,12 +120,19 @@ def _send(method: str, uri: str, body: str | None, content_type: str | None) -> 
         return exc.code
 
 
-def verify(endpoint: str, samples: list[dict]) -> dict:
+def verify(endpoint: str, samples: list[dict], protected: list[dict] | None = None) -> dict:
     """Replay `samples` (BreachTracker's structured bypass records for
     `endpoint`) and the endpoint's benign set against the live WAF, and
     return a structured report. Call only after reload_waf(): a rule that is
     written but not yet reloaded isn't live, so every replay would just
     re-confirm the old gaps.
+
+    `protected` is BreachTracker.protected_samples(): every request an
+    earlier verified rule was confirmed to block, on any endpoint. Each one
+    that gets through now is a *regression* (lost coverage) and fails the
+    verdict. This is the code-enforced fix for "rule rewrites can lose old
+    coverage without anything noticing": the capped `samples` alone can't
+    catch it, because old evidence gets evicted from them.
     """
     # nginx's `-s reload` returns once the signal is sent; new workers pick up
     # the new ruleset asynchronously. Without a short settle, an immediate
@@ -133,17 +141,26 @@ def verify(endpoint: str, samples: list[dict]) -> dict:
 
     still_bypassing, blocked, not_replayable = [], 0, 0
     for sample in samples:
-        method, uri, body = sample.get("method"), sample.get("uri"), sample.get("body")
-        # A POST recorded only from the access log has no body (nginx doesn't
-        # log one), so replaying it would send a different, empty request.
-        if not method or not uri or (method != "GET" and body is None):
+        if not is_replayable(sample):
             not_replayable += 1
             continue
-        status = _send(method, _retag(uri), body, sample.get("content_type"))
+        status = _send(sample["method"], _retag(sample["uri"]), sample.get("body"), sample.get("content_type"))
         if status == 403:
             blocked += 1
         else:
             still_bypassing.append({"request": sample["text"], "status": status})
+
+    # Protected requests not already replayed above (same marker = same
+    # request, no need to send it twice).
+    current = {s.get("marker") for s in samples}
+    regressions, protected_checked = [], 0
+    for sample in protected or []:
+        if sample.get("marker") in current or not is_replayable(sample):
+            continue
+        protected_checked += 1
+        status = _send(sample["method"], _retag(sample["uri"]), sample.get("body"), sample.get("content_type"))
+        if status != 403:
+            regressions.append({"request": sample["text"], "status": status})
 
     # All endpoints' benign requests, regardless of `endpoint` (see the
     # module docstring: rules are global, not per-URL).
@@ -160,6 +177,8 @@ def verify(endpoint: str, samples: list[dict]) -> dict:
         problems.append(f"{len(still_bypassing)} recorded bypass(es) still get through")
     if falsely_blocked:
         problems.append(f"{len(falsely_blocked)} benign request(s) are now blocked")
+    if regressions:
+        problems.append(f"{len(regressions)} previously blocked attack(s) now get through (lost coverage)")
     return {
         "endpoint": endpoint,
         "attack_replay": {
@@ -172,6 +191,11 @@ def verify(endpoint: str, samples: list[dict]) -> dict:
             "sent": len(benign),
             "falsely_blocked": falsely_blocked,
             "note": "covers all endpoints - rules apply site-wide, not just to the endpoint being fixed",
+        },
+        "coverage_check": {
+            "protected_replayed": protected_checked,
+            "regressions": regressions,
+            "note": "attacks an earlier verified rule blocked, on any endpoint - each must still be blocked",
         },
         "verdict": "PASS" if not problems else "FAIL: " + "; ".join(problems),
     }

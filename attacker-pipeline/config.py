@@ -30,3 +30,22 @@ MIN_VARIANT_LENGTH = int(os.environ.get("MIN_VARIANT_LENGTH", 4))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WAF_ERROR_LOG = os.path.join(REPO_ROOT, "waf-defense", "logs", "error.log")
 METRICS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "metrics")
+
+# Extra Ollama rounds harness/orchestrator.build_wave may spend topping up
+# seeds whose variants came back short (junk filtered out, a timeout), so a
+# wave still reaches WAVE_SIZE. Capped so a misbehaving model can't hang a run.
+WAVE_TOPUP_ROUNDS = int(os.environ.get("WAVE_TOPUP_ROUNDS", 2))
+
+# Auto-triggering the defensive agent between waves (`run.py --defend`, see
+# harness/defender.py). The agent runs in its own virtualenv, so the harness
+# starts it with that venv's interpreter rather than its own.
+DEFENSIVE_AGENT_DIR = os.path.join(REPO_ROOT, "defensive-agent")
+DEFENSIVE_AGENT_PYTHON = os.environ.get(
+    "DEFENSIVE_AGENT_PYTHON", os.path.join(DEFENSIVE_AGENT_DIR, ".venv", "bin", "python")
+)
+# Upper bound on one defensive pass (all tripped endpoints). A normal pass is a
+# few minutes; this just stops a hung API call from stalling the run forever.
+AGENT_TIMEOUT_SECONDS = int(os.environ.get("AGENT_TIMEOUT_SECONDS", 900))
+# Pause after a wave before the agent checks breach status, so the WAF's last
+# log lines for the wave are on disk.
+LOG_SETTLE_SECONDS = float(os.environ.get("LOG_SETTLE_SECONDS", 2))

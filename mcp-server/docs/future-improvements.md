@@ -35,7 +35,9 @@ Options (undecided): fail or warn when `not_replayable` is above zero (excluding
 would need tagging so they can be told apart); or check on startup that the audit log exists and is being
 written, and refuse to verify if not. Low priority while the current compose file has the audit log on.
 
-## Rule rewrites can lose old coverage without anything noticing
+## ✅ Rule rewrites can lose old coverage without anything noticing — BUILT (2026-11-13, not yet live-tested)
+
+Built as the "permanent replay list" option (`BreachTracker` protected list + `coverage_check` in `verify_rule`). The live test below wasn't run first, because Docker was unavailable; the reasons for building it anyway are in `../../docs/post-review-fixes.md` §3. Multi-wave `--defend` runs now measure the problem: each FAIL listing `regressions` is a rewrite that tried to drop coverage. The original write-up is kept below.
 
 *Found during the Step 2 code review, 2026-11-06. **Priority to work out after the review**; it
 matters most once multi-wave runs start rewriting the same rule repeatedly.*

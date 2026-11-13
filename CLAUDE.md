@@ -24,7 +24,9 @@ AI-driven attacker and an AI-driven defender:
   defender models; the offensive side stays on local Ollama/Llama-3 unchanged.
 - **Evaluation**: an independent test harness scores each cycle on Mean Time to Mitigation (MTTM),
   Bypass Decay Rate (α, across attack waves of 50 payloads), Rule Generality Index (RGI — does a
-  rule generalize to unseen variants, not just the one it was written for), and Regressive False
+  rule generalize to unseen variants, not just the one it was written for; **redefined 2026-11-13** as
+  the AI rules' *added value over CRS*: share of unseen later-wave variants blocked by an AI rule
+  (ID ≥ 1000000) that CRS let through — see `docs/post-review-fixes.md`, live-check result), and Regressive False
   Positive Rate (RFPR, target 0% — patches must not break benign traffic).
 
 Everything runs local/containerized (WSL2 host), zero budget, LLM-agnostic by design (defensive
@@ -85,6 +87,13 @@ over this list.
     6-step plan, progress table, roles (student leads, Claude tutors), and open advisor items;
     each step gets its own chat and its own `stepN-<topic>.md` walkthrough notes file. A new
     review chat should read the README + the previous step's notes first.
+  - `docs/advisor-meeting-2026-11-13.md` — run-sheet for presenting the code review, the
+    post-review fixes, and the first live closed-loop smoke run to the advisor; includes the RGI
+    attribution finding (949110 masks AI rules) as a discussion item and the planned runner CLI.
+  - `docs/post-review-fixes.md` — what was built right after the code review (2026-11-13): the
+    harness-driven agent auto-trigger (`run.py --defend`), per-endpoint threshold reset after a verified
+    rule, the protected replay list against coverage loss, code-bound rule_id/endpoint in the agent, and
+    balanced waves. Offline-tested; the live-check steps are at the bottom.
   - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
@@ -114,8 +123,11 @@ over this list.
   makes "static rule IDs" idempotent rather than hoped-for), then hands the LLM the evidence
   (`get_breach_status()`'s `sample_bypasses`, bucketed by attack family) to design and write a rule
   via `write_idempotent_rule` → `test_waf_configuration` → `reload_waf` → `verify_rule` (revise if it
-  fails). Runs as a single "dry run"
-  pass (`agent.py`), not a polling loop — see `defensive-agent/docs/Sprint4_Summary.md`.
+  fails). Runs as a single pass (`agent.py`), either by hand or after every wave via the attacker harness's
+  `run.py --defend` (`attacker-pipeline/harness/defender.py`, which starts it as a subprocess) — see
+  `defensive-agent/docs/Sprint4_Summary.md` and `docs/post-review-fixes.md`. rule_id and endpoint are
+  bound into the rule tools by code (`core/graph.py` `_bound_tools`), so the model never supplies them.
+  - `defensive-agent/tests/` — offline `unittest` tests (run from `defensive-agent/`).
   - `defensive-agent/docs/` — sprint summaries and debug notes specific to this subproject.
     - `defensive-agent/docs/transcripts/` — saved verbatim agent-run transcripts kept as demo/
       reference artifacts (e.g. `sprint4.5-fail-revise-pass.txt`, the FAIL→revise→PASS run the

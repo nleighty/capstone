@@ -41,3 +41,10 @@ CUSTOM_RULE_ID_MAX = 1999999
 RULE_REGISTRY_STATE_FILE = os.environ.get(
     "RULE_REGISTRY_STATE_FILE", os.path.join(AGENT_DIR, "state", "rule_registry_state.json")
 )
+
+# Hard cap on LangGraph steps per endpoint run (each tool round-trip is two
+# steps: model, then tool). The prompt asks for at most 3 verify_rule attempts,
+# which with read/write/test/reload is ~30 steps; 60 leaves room for a few
+# failed config tests while still stopping a runaway loop that nobody is
+# watching once the harness auto-triggers the agent.
+AGENT_MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", 60))

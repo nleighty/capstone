@@ -15,13 +15,6 @@ threshold. Verified directly against the real Sprint 1 error.log before writing 
 521 of 522 existing lines carried `[id "949110"]`, one carried `[id "999999"]` (Sprint 1's manual
 test rule).
 
-**Why this doesn't block RGI later:** `docs/design-notes.md`'s MCP sketch has the defensive agent
-write rules with a direct `deny` action (`id:{rule_id},...,deny,status:403`), not an anomaly-score
-contribution. A `deny` rule logs its own ID directly on match — no aggregation in the way. So
-`harness/log_reader.py`'s correlation logic (match `_wave_marker` → extract `[id "(\d+)"]`) will
-correctly pick up custom `900001`+ IDs once Sprint 3-4's agent exists; it's only "always 949110"
-because there's nothing else to match against yet. No rework needed when that sprint lands.
-
 **Practical implication for reading Sprint 2's `metrics.csv`:** treat `matched_rule_id == 949110`
 as "blocked by the default CRS ruleset's cumulative score," not as evidence of which signature
 fired. If per-signature attribution is ever needed for Sprint 2-era data specifically, it would
