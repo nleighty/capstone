@@ -147,7 +147,7 @@ Fire this only after `server.py` (above) is already running:
 ```bash
 cd ~/capstone/attacker-pipeline
 source .venv/bin/activate
-python3 run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT]
+python3 run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT] [--defend]
 ```
 
 | Flag | Default | Use |
@@ -161,6 +161,9 @@ Common invocations:
 - Real baseline capture (defaults): `python3 run.py`
 - Quick smoke test: `python3 run.py --waves 1 --wave-size 5 --pause 0`
 - Advisor demo: `python3 run.py --waves 1 --label demo`
+- **Closed loop (attack → defend → attack)**: `python3 run.py --defend` (MCP server must be running;
+  `defensive-agent/.env` needs the API key). The agent runs after every wave; results go to
+  `metrics/run_<id>_agent.csv`. Smoke version: `python3 run.py --waves 3 --wave-size 20 --defend --label smoke`
 
 For proposed-but-not-yet-built CLI flags, see `attacker-pipeline/docs/future-improvements.md`.
 

@@ -16,9 +16,12 @@ def main():
     parser.add_argument("--wave-size", type=int, default=None, help="Payloads per wave (default: config.WAVE_SIZE)")
     parser.add_argument("--pause", type=int, default=None, help="Seconds between waves (default: config.WAVE_PAUSE_SECONDS)")
     parser.add_argument("--label", type=str, default=None, help="Tag the output CSV filename (e.g. --label demo) so it's clearly not a baseline-capture run")
+    parser.add_argument("--defend", action="store_true",
+                        help="Run the defensive agent after every wave (closed loop; MCP server must be running)")
     args = parser.parse_args()
 
-    run(num_waves=args.waves, wave_size=args.wave_size, pause_seconds=args.pause, label=args.label)
+    run(num_waves=args.waves, wave_size=args.wave_size, pause_seconds=args.pause, label=args.label,
+        defend=args.defend)
 
 
 if __name__ == "__main__":

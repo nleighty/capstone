@@ -138,16 +138,25 @@ def verify_rule(endpoint: str) -> dict:
     get through (gaps in your rule), and (b) benign_check.falsely_blocked -
     ordinary requests the WAF now rejects on ANY endpoint (rules are not scoped
     to a URL, so a rule written for one endpoint is live everywhere - your rule
-    is too broad). verdict is
-    PASS only if both lists are empty. It cannot send anything other than
+    is too broad), and (c) coverage_check.regressions - attacks that an
+    earlier verified rule blocked (on any endpoint) but that now get through,
+    i.e. your rewrite dropped coverage the old rule had. verdict is
+    PASS only if all three lists are empty. It cannot send anything other than
     what the server already logged plus its built-in benign set. A passing
     verdict means the rule covers the evidence it was written from - not that
     it covers unseen variants.
     """
+    samples = _breach_tracker.samples_for(endpoint)
     try:
-        return rule_verifier.verify(endpoint, _breach_tracker.samples_for(endpoint))
+        report = rule_verifier.verify(endpoint, samples, _breach_tracker.protected_samples())
     except OSError as exc:
         return {"endpoint": endpoint, "verdict": f"ERROR: could not reach the WAF to replay ({exc})"}
+    # Only an objective PASS closes out a breach (restarts the endpoint's trip
+    # counter and adds the now-blocked attacks to the protected list) - see
+    # BreachTracker.mark_mitigated.
+    if report["verdict"] == "PASS":
+        _breach_tracker.mark_mitigated(endpoint, samples)
+    return report
 
 
 if __name__ == "__main__":

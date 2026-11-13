@@ -206,6 +206,38 @@ class DegenerateBypassGuard(TrackerCase):
         self.assertEqual(len(self.tracker._bypass_samples[EP]["sqli"]), 1)
 
 
+class TripSinceLastRule(TrackerCase):
+    """Post-review fix: tripping counts bypasses since the endpoint's last
+    verified rule, so a fixed endpoint isn't re-worked every agent pass."""
+
+    def fire(self, n, wave=1):
+        for i in range(n):
+            self.feed("access", get_line("q=<script>alert(1)</script>", f"w{wave}-xss-0{i % 8 + 1}-{i}"))
+
+    def test_mitigated_endpoint_untrips_then_retrips_on_new_bypasses(self):
+        self.fire(config.BREACH_THRESHOLD)
+        self.assertIn(SEARCH_EP, self.tracker.status()["tripped_endpoints"])
+
+        self.tracker.mark_mitigated(SEARCH_EP, self.tracker.samples_for(SEARCH_EP))
+        status = self.tracker.status()
+        self.assertNotIn(SEARCH_EP, status["tripped_endpoints"])
+        self.assertEqual(status["bypasses_since_rule"][SEARCH_EP], 0)
+        self.assertEqual(status["bypass_counts"][SEARCH_EP], config.BREACH_THRESHOLD)  # telemetry kept
+
+        self.fire(config.BREACH_THRESHOLD, wave=2)
+        self.assertIn(SEARCH_EP, self.tracker.status()["tripped_endpoints"])
+
+    def test_protected_list_survives_restart_and_skips_unreplayable(self):
+        self.fire(2)
+        self.feed("access", access_line("w1-sqli-01-1"))  # bodiless POST: not replayable
+        samples = self.tracker.samples_for(SEARCH_EP) + self.tracker.samples_for(EP)
+        self.tracker.mark_mitigated(SEARCH_EP, samples)
+        self.tracker.mark_mitigated(SEARCH_EP, samples)  # second call must not duplicate
+        protected = self.new_tracker().protected_samples()
+        self.assertEqual(len(protected), 2)
+        self.assertTrue(all(s["method"] == "GET" for s in protected))
+
+
 class MeaningfulLen(unittest.TestCase):
     def test_looks_through_json_envelope(self):
         self.assertEqual(log_parser._meaningful_len('{"comment":"["}'), 1)

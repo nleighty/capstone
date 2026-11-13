@@ -17,20 +17,18 @@ code-owned and reproducible rather than something the model has to reason
 its way to correctly every run.
 """
 
+import json
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
+from langchain_core.tools import StructuredTool
 from langgraph.prebuilt import create_react_agent
 
 import config
 
-REACT_TOOL_NAMES = (
-    "read_current_rule",
-    "read_waf_logs",
-    "write_idempotent_rule",
-    "test_waf_configuration",
-    "reload_waf",
-    "verify_rule",
-)
+# MCP tools handed to the model unchanged - none of them take an argument that
+# could point the agent at another endpoint's rule.
+PASSTHROUGH_TOOL_NAMES = ("read_waf_logs", "test_waf_configuration", "reload_waf")
 
 SYSTEM_PROMPT = """You are the defensive half of an adaptive WAF security system.
 
@@ -53,8 +51,11 @@ that has since been revised or removed. A pattern or description text appearing 
 not, by itself, evidence that it belongs in the rule you write now - only trust read_current_rule \
 for that question.
 
+Your rule_id and endpoint are fixed by code: read_current_rule, write_idempotent_rule and \
+verify_rule are already bound to them, so you never pass either one.
+
 Steps:
-1. Call read_current_rule with your assigned rule_id FIRST, before anything else. If it returns an \
+1. Call read_current_rule FIRST, before anything else. If it returns an \
 existing rule, treat its current coverage as a floor, not a draft to discard - your job is to \
 extend it to also cover today's evidence, not silently narrow it. Today's sample bypasses are \
 capped and may not include every pattern the existing rule already protects against; a pattern not \
@@ -67,22 +68,24 @@ needs coverage - both anything already in the existing rule from step 1, and any
 today's evidence) that matches these payloads and their likely variants, without being so broad it \
 would catch ordinary benign input. It will be matched via ModSecurity's @rx operator against \
 REQUEST_COOKIES|ARGS automatically - you only supply the raw regex body.
-4. Call write_idempotent_rule using EXACTLY the rule_id you were given - never invent your own. \
-Reusing the same ID is what makes a repeat fix overwrite the old rule instead of piling up a \
-duplicate.
+4. Call write_idempotent_rule with your attack_pattern and a short description. It always \
+overwrites your assigned rule in place, so a repeat fix replaces the old rule instead of piling up \
+a duplicate.
 5. Call test_waf_configuration. If it reports failure, revise attack_pattern and call \
-write_idempotent_rule again with the same rule_id, then re-test.
+write_idempotent_rule again, then re-test.
 6. Only once a test reports success, call reload_waf.
-7. Then call verify_rule with your endpoint. test_waf_configuration only proves the config parses - \
+7. Then call verify_rule. test_waf_configuration only proves the config parses - \
 verify_rule is the only check that the rule actually works. It replays the bypassing requests \
-recorded for this endpoint through the live WAF and also sends a few ordinary requests. Read both \
-lists in its result:
+recorded for this endpoint through the live WAF, re-tests every attack an earlier verified rule \
+blocked, and also sends a few ordinary requests. Read all three lists in its result:
    - attack_replay.still_bypassing: recorded attacks your rule failed to block. Work out why each \
 slipped past (an encoding you didn't anticipate, an anchor that's too strict) and widen the regex.
    - benign_check.falsely_blocked: ordinary requests your rule now blocks. Your regex is too broad - \
 narrow it. A false positive on legitimate traffic is worse than a missed attack, so when the two \
 conflict, favor not blocking benign traffic.
-   If the verdict is not PASS, revise attack_pattern and repeat steps 4-7 with the same rule_id, up to \
+   - coverage_check.regressions: attacks that were blocked before your rewrite and now get through - \
+you dropped coverage the old rule had. Put that coverage back.
+   If the verdict is not PASS, revise attack_pattern and repeat steps 4-7, up to \
 3 verify_rule attempts in total, then stop and report what remains.
 8. Some recorded "bypasses" are not attacks at all (e.g. a request whose entire payload is a single \
 character like "["): the WAF correctly let them through. If a still_bypassing entry looks like \
@@ -95,9 +98,69 @@ reload -> verify_rule. Never call reload_waf unless the most recent test_waf_con
 success. Call verify_rule only after reload_waf - before that the new rule isn't live."""
 
 
-def build_agent(tools_by_name: dict):
-    """Compile the ReAct agent, bound to only the tools it's allowed to act
-    with (see module docstring for why get_breach_status is excluded).
+def _as_text(result) -> str:
+    """Flatten an MCP tool result (a list of content blocks, a string, or a
+    dict) into plain text for the model and for verdict parsing."""
+    if isinstance(result, list):
+        return "\n".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in result)
+    return result if isinstance(result, str) else json.dumps(result)
+
+
+def _bound_tools(tools_by_name: dict, endpoint: str, rule_id: int) -> list:
+    """The tool set for one endpoint's run, with rule_id and endpoint filled
+    in by code instead of by the model.
+
+    Before this (post-review fix, 2026-11-13), the assigned rule_id was only
+    enforced by the prompt ("use exactly this value"): the model could pass
+    any in-range ID to write_idempotent_rule - by mistake or because injected
+    log text told it to - and overwrite another endpoint's rule, and
+    verify_rule (checking only *its* endpoint) wouldn't notice. Now those
+    three tools simply have no rule_id/endpoint parameter for the model to
+    get wrong. The MCP server's own tools are unchanged; this is enforced at
+    the agent layer, which is the only MCP client.
+    """
+    read_rule = tools_by_name["read_current_rule"]
+    write_rule = tools_by_name["write_idempotent_rule"]
+    verify = tools_by_name["verify_rule"]
+
+    async def read_current_rule() -> str:
+        return _as_text(await read_rule.ainvoke({"rule_id": rule_id}))
+
+    async def write_idempotent_rule(attack_pattern: str, description: str) -> str:
+        return _as_text(await write_rule.ainvoke(
+            {"rule_id": rule_id, "attack_pattern": attack_pattern, "description": description}
+        ))
+
+    async def verify_rule() -> str:
+        return _as_text(await verify.ainvoke({"endpoint": endpoint}))
+
+    bound = [
+        StructuredTool.from_function(
+            coroutine=read_current_rule, name="read_current_rule",
+            description="Return your assigned rule's current line, or a 'no existing rule' message.",
+        ),
+        StructuredTool.from_function(
+            coroutine=write_idempotent_rule, name="write_idempotent_rule",
+            description=(
+                "Write (or overwrite in place) your assigned rule. attack_pattern is a raw regex, "
+                "matched via @rx against REQUEST_COOKIES|ARGS; description becomes the rule's msg."
+            ),
+        ),
+        StructuredTool.from_function(
+            coroutine=verify_rule, name="verify_rule",
+            description=(
+                "After reload_waf: replay this endpoint's recorded bypasses, every attack an earlier "
+                "verified rule blocked, and a benign set through the live WAF. PASS only if all hold."
+            ),
+        ),
+    ]
+    return bound + [tools_by_name[name] for name in PASSTHROUGH_TOOL_NAMES]
+
+
+def build_agent(tools_by_name: dict, endpoint: str, rule_id: int):
+    """Compile the ReAct agent for one endpoint, bound to only the tools it's
+    allowed to act with (see module docstring for why get_breach_status is
+    excluded, and _bound_tools for how rule_id/endpoint are fixed).
     """
     # Prompt caching (Anthropic only caches when asked - nothing is cached by
     # default, which is why the Console showed zero cache activity before this
@@ -117,7 +180,10 @@ def build_agent(tools_by_name: dict):
     # is the documented langchain-anthropic API and is exercised live; the
     # diagnostic is a stub limitation, not a real error, so suppress just it.
     model = ChatAnthropic(model=config.ANTHROPIC_MODEL, model_kwargs={"cache_control": {"type": "ephemeral"}})  # pyright: ignore[reportCallIssue]
-    react_tools = [tools_by_name[name] for name in REACT_TOOL_NAMES]
+    # The bound tools' names, descriptions, and schemas are identical for every
+    # endpoint (only the values captured inside them differ), so building a new
+    # agent per endpoint doesn't break the prompt cache.
+    react_tools = _bound_tools(tools_by_name, endpoint, rule_id)
     system_message = SystemMessage(
         content=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
     )
@@ -153,11 +219,13 @@ async def run_for_endpoint(
     it work" spirit as mcp-server/demo_client.py's numbered menu, just
     automated instead of hand-driven.
 
-    Returns the final graph state for the caller's summary line.
+    Returns a short run summary - the last verify_rule verdict and how many
+    times verify_rule was called - for agent.py's per-run summary (which the
+    attacker harness reads when it auto-triggers the agent).
     """
     task = (
         f"Endpoint: {endpoint}\n"
-        f"Assigned rule_id: {rule_id} (fixed - use exactly this value, never choose your own)\n"
+        f"Assigned rule_id: {rule_id} (already bound to your rule tools - you never pass it)\n"
         f"{bypass_count} bypassing requests have been recorded for this endpoint; the "
         f"{sum(len(v) for v in samples_by_family.values())} below are a representative subset, "
         f"chosen to cover as many distinct attack variants as possible (not the most recent), so "
@@ -170,7 +238,13 @@ async def run_for_endpoint(
 
     final_state = None
     printed = 0
-    async for step in agent.astream({"messages": [("user", task)]}, stream_mode="values"):
+    # recursion_limit is a hard backstop on runaway loops: the "up to 3
+    # verify_rule attempts" cap is otherwise only in the prompt, and once the
+    # harness auto-triggers the agent nobody is watching to stop it. A run past
+    # the limit raises GraphRecursionError, which agent.py records as an error.
+    async for step in agent.astream(
+        {"messages": [("user", task)]}, {"recursion_limit": config.AGENT_MAX_STEPS}, stream_mode="values"
+    ):
         final_state = step
         messages = step["messages"]
         # stream_mode="values" re-emits the *full* accumulated message list
@@ -196,9 +270,26 @@ async def run_for_endpoint(
     # happened at all) - nothing to summarize, and _print_cache_usage would
     # fail on final_state["messages"]. Return an empty state in that case.
     if final_state is None:
-        return {}
+        return {"verdict": "no model call happened", "verify_attempts": 0}
     _print_cache_usage(endpoint, final_state)
-    return final_state
+    return summarize_run(final_state["messages"])
+
+
+def summarize_run(messages: list) -> dict:
+    """Pull the outcome out of a finished run's messages: how many times
+    verify_rule was called and the verdict of the last call. Read from the
+    tool's own output, not from the model's closing summary, so the recorded
+    result is the objective check rather than the model's account of it.
+    """
+    verdict, attempts = "never verified", 0
+    for message in messages:
+        if getattr(message, "type", None) == "tool" and getattr(message, "name", None) == "verify_rule":
+            attempts += 1
+            try:
+                verdict = json.loads(_as_text(message.content)).get("verdict", "unknown")
+            except (json.JSONDecodeError, AttributeError):
+                verdict = "unparseable verify_rule result"
+    return {"verdict": verdict, "verify_attempts": attempts}
 
 
 def _print_cache_usage(endpoint: str, final_state: dict) -> None:

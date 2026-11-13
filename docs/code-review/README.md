@@ -94,6 +94,9 @@ heavy WAF rules (Step 2), and the LangGraph flow (Step 5).
 
 ## To work out after the review
 
+**2026-11-13: the first four are built on branch `post-review-fixes`, with offline tests, but haven't had a live run yet.**
+See `docs/post-review-fixes.md`. The baseline rerun is held until the system is "final-ish".
+
 - **Rule rewrites can lose old coverage without anything noticing** (found in Step 2; Nic wants this
   treated as a priority). Details and options: `mcp-server/docs/future-improvements.md`.
 - **Uneven seed coverage and wave size not guaranteed** (found in Step 3; Nic wants this fixed before Sprint 5

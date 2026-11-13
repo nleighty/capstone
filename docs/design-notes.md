@@ -90,9 +90,13 @@ Per-metric implementation notes:
   `metrics.csv`.
 - **Bypass Decay / RGI** — lives in the offensive script, since it's the one that knows what a
   "wave" is. Fire 50 payloads per wave, track `200 OK` (bypass) vs `403 Forbidden` (blocked). For
-  RGI specifically: ModSecurity logs the exact rule ID that blocked a request (e.g. `[id
-  "1000000"]"`) — if a Wave 2 attack is blocked by a rule generated in Wave 1, that's an RGI point.
-  Pause ~60s between waves to let the agent patch before the next wave fires.
+  RGI specifically: RGI measures the AI rules' **added value over CRS**, meaning the share of new,
+  unseen later-wave variants blocked by an AI rule (ID ≥ 1000000) that CRS let through. The harness
+  records the rule ID that blocked each request (`matched_rule_id`). When CRS and an AI rule both
+  match, CRS's blocking check (`949110`) denies first, so an AI rule's ID in that column means
+  exactly "CRS missed this, the AI rule caught it". Leave out later-wave variants identical to ones
+  the agent was shown, since those aren't unseen. The agent runs between waves (`run.py --defend`),
+  so each wave hits the rules written after the previous one.
 - **RFPR** — lives in the test harness as a post-deployment hook. Maintain a fixed set of 50–100
   legitimate benign requests (browse home page, add to cart, normal login, etc.). Whenever the
   defensive agent deploys a new rule, the harness immediately fires all of them; any `403` on a
