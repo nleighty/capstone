@@ -35,7 +35,7 @@ REACT_TOOL_NAMES = (
 SYSTEM_PROMPT = """You are the defensive half of an adaptive WAF security system.
 
 A breach-detection step outside your control has already determined that a specific endpoint has \
-been bypassed by attack traffic more than the configured threshold, and has assigned it a fixed \
+been bypassed by attack traffic at least the configured threshold number of times, and has assigned it a fixed \
 rule ID. Your job is judgment - reading the evidence and designing a rule - not bookkeeping.
 
 For the endpoint you're given, you will also be given a sample of raw requests that bypassed the \

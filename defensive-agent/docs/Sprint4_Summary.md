@@ -69,6 +69,13 @@ correction note for the pointer back.
 - **`config.py`** — same `os.environ.get(...)` pattern as the other two subprojects; loads
   `.env` via `python-dotenv` for `ANTHROPIC_API_KEY`.
 
+> ⚠️ **Correction (Sprint 4.5, noted in the Step 5 code review 2026-11-13):** the tool counts in
+> this summary are as of Sprint 4. Sprint 4.5 added `verify_rule(endpoint)`, so the MCP server now
+> has **7 tools** and the ReAct agent is bound to **6** (the five listed above plus `verify_rule`;
+> `get_breach_status` is still excluded). The system prompt's steps now end with reload →
+> `verify_rule` → revise on FAIL, up to 3 attempts. See `Sprint4.5_Cleanup.md` and
+> `core/graph.py`'s `REACT_TOOL_NAMES`.
+
 ## Design decisions made this sprint
 
 - **Plain Python loop + `create_react_agent`, not a hand-built outer `StateGraph`.** A dry run's
