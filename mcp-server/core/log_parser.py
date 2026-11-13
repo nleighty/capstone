@@ -11,10 +11,9 @@ Tracks two separate signals per endpoint (URL path, query string stripped):
 
 Only *bypasses* trip config.BREACH_THRESHOLD. This matches the proposal's own
 language ("analyzes successful WAF bypasses", "endpoint breach threshold") -
-a payload the WAF blocks is already handled, so a "significantly"
-(>5 bypasses for this project)successful mutation
-wave is exactly the scenario that should trip the
-threshold. See docs/design-notes.md's "Threshold tracking"
+a payload the WAF blocks is already handled, so a significantly successful
+mutation wave (>= config.BREACH_THRESHOLD bypasses on one endpoint, default 5)
+is exactly the scenario that should trip the threshold. See docs/design-notes.md's "Threshold tracking"
 section for the full rationale, including why a bypass means any non-403
 response rather than specifically a 2xx. Blocked counts are still tracked
 and returned - they're useful telemetry (e.g. sizing read_waf_logs()'s

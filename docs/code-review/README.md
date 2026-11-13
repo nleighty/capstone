@@ -54,8 +54,8 @@ fix coverage only if the data shows loss → report/presentation from ~Nov 20.
 | 1 | Concept & architecture | `docs/proposal/Proposal_20261004.pdf` + `diagram_20261004.png` (the current versions; the July files are history only), `docs/design-notes.md`, repo layout in `CLAUDE.md` | ✅ 2026-10-31 — `step1-architecture.md` |
 | 2 | Target + WAF | `waf-defense/docker-compose.yml`, ModSecurity/OWASP CRS basics, SecRule syntax, `waf-defense/modsec-rules/` | ✅ 2026-11-06 — `step2-waf.md` |
 | 3 | Attacker pipeline | `attacker-pipeline/`: `payloads/seeds.py` → `core/mutate.py` → `core/fire.py` → `harness/orchestrator.py` → metrics; then `analyze.py` | ✅ 2026-11-12 — `step3-attacker.md` |
-| 4 | MCP server | `mcp-server/server.py`, `core/log_parser.py` (dense; likely several sessions), `rule_writer.py`, `rule_verifier.py`, `waf_control.py`, `reset_state.py` | ⏳ next |
-| 5 | Defensive agent | `defensive-agent/agent.py`, `core/rule_registry.py`, `core/graph.py` (LangGraph ReAct) | ◻ |
+| 4 | MCP server | `mcp-server/server.py`, `core/log_parser.py` (dense; likely several sessions), `rule_writer.py`, `rule_verifier.py`, `waf_control.py`, `reset_state.py` | ✅ 2026-11-12 — `step4-mcp-server.md` (one rapid session) |
+| 5 | Defensive agent | `defensive-agent/agent.py`, `core/rule_registry.py`, `core/graph.py` (LangGraph ReAct) | ⏳ next |
 | 6 | Cross-cutting | `SECURITY.md`, prompt-injection/MCP-value argument, the four metrics (MTTM, α, RGI, RFPR), what's measured vs. not yet | ◻ |
 
 ## Doc map — what to read, when
@@ -98,6 +98,10 @@ heavy WAF rules (Step 2), and the LangGraph flow (Step 5).
   treated as a priority). Details and options: `mcp-server/docs/future-improvements.md`.
 - **Uneven seed coverage and wave size not guaranteed** (found in Step 3; Nic wants this fixed before Sprint 5
   runs). `xss-06`/`07`/`08` never fired in the baseline. Plan: `attacker-pipeline/docs/future-improvements.md`.
+- **The breach threshold never resets, so every agent pass reworks every endpoint that has ever tripped** (found in Step 4; Nic wants this
+  fixed before Sprint 5 runs). `tripped_endpoints` is cumulative until `reset_state.py`, and `agent.py` loops over all of it, so once the agent
+  is auto-triggered per wave it would rewrite already-fixed rules from stale samples. That wastes API calls, adds coverage-loss risk, and makes
+  MTTM's start time meaningless. Best built alongside the auto-trigger. Details and options: `step4-mcp-server.md`, "Open items".
 - **Rerun the baseline** in the Sprint 5 runs. The recorded 33.6% includes 13 junk rows (30.0% without them).
 
 ## Open items to take to the advisor

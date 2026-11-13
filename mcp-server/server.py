@@ -1,7 +1,8 @@
 """The defensive MCP server: exposes the WAF's "hands and eyes" as MCP tools
-so a future agent (Sprint 4) can read logs, check breach thresholds, validate
-a proposed rule, write it, and reload the WAF - without needing to know any
-of the underlying Docker/file details itself.
+so the defensive agent (defensive-agent/, Sprint 4) can read logs, check
+breach thresholds, validate a proposed rule, write it, reload the WAF, and
+verify the result - without needing to know any of the underlying
+Docker/file details itself.
 
 Note on the class name: docs/design-notes.md's sketch uses `FastMCP` from the
 `mcp` SDK's v1 API; this project installed mcp 2.x, where that class was
@@ -11,8 +12,8 @@ renamed to `MCPServer` (same decorator-based `@app.tool()` API, just a rename
 Runs as a standalone, always-on local service over streamable-HTTP (same
 "long-running service other scripts connect to" pattern as the WAF/Juice Shop
 Docker containers and the Ollama systemd service), rather than being launched
-per-client over stdio - there's no natural client to launch it yet until
-Sprint 4's agent exists.
+per-client over stdio. That was chosen in Sprint 3, before any agent existed
+to launch it; the Sprint 4 agent connects to it over HTTP as-is.
 """
 
 import config

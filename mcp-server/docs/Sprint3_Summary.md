@@ -121,6 +121,13 @@ mcp`, resolved to v2.1.1 — note its `FastMCP` class was renamed to `MCPServer`
 > coverage an earlier version of the rule had for a pattern that isn't bypassing right now. See
 > `defensive-agent/docs/Sprint4_Summary.md`.
 
+> ⚠️ **Correction (Sprint 4.5, noted in the Step 4 code review 2026-11-12):** the server now has
+> **7 tools**, not five. A 7th, `verify_rule(endpoint)` (`core/rule_verifier.py`), replays recorded
+> bypasses plus a fixed benign set against the live WAF and returns PASS/FAIL. Also,
+> `read_waf_logs()` no longer returns raw lines by default: each block is compacted to time /
+> status / rule id / msg / data / request (`raw=True` gives the old output), and `_replay=1` lines
+> from `verify_rule` are hidden. See `defensive-agent/docs/Sprint4.5_Cleanup.md`.
+
 ## Status: Sprint 3 Complete
 
 | Deliverable | Status |

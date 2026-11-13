@@ -19,6 +19,22 @@ correct), so this is a larger change than it looks. The practical harm is small 
 inflation from junk POSTs; the dangerous part — junk reaching the agent/verifier — is already
 closed). Revisit only if Sprint 5's α (bypass decay) turns out to be sensitive to it.
 
+## `verify_rule` can PASS without re-testing POST attacks (`not_replayable`)
+
+*Found during the Step 4 code review, 2026-11-12.*
+
+`verify_rule` skips any sample it can't rebuild (a non-GET with no body) and counts it in
+`attack_replay.not_replayable`, but that count doesn't affect the verdict. A POST sample only gets a body
+when its audit-log entry enriches it. That doesn't happen when (1) the body was junk (the degeneracy guard
+skips it, correctly), (2) the audit log is missing or disabled (e.g. a `docker-compose.yml` without
+`MODSEC_AUDIT_LOG`), so *every* POST sample is skipped, or (3) the sample was loaded from a state file
+saved before samples were structured. Case 2 is the risk: the verdict says PASS while the login and
+Feedbacks attacks were never replayed.
+
+Options (undecided): fail or warn when `not_replayable` is above zero (excluding junk-body skips, which
+would need tagging so they can be told apart); or check on startup that the audit log exists and is being
+written, and refuse to verify if not. Low priority while the current compose file has the audit log on.
+
 ## Rule rewrites can lose old coverage without anything noticing
 
 *Found during the Step 2 code review, 2026-11-06. **Priority to work out after the review**; it
