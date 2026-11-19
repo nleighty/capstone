@@ -55,7 +55,8 @@ BREACH_THRESHOLD = int(os.environ.get("BREACH_THRESHOLD", 5))
 # thinned first. This was 5/last-N originally; that showed the agent one
 # mutation family out of many. Each sample is <= ~600 chars, so 20 per bucket
 # is only a few thousand prompt tokens - and the exact count still lives in
-# bypass_counts.
+# bypass_counts. These caps limit only what the agent is *shown*: verify_rule
+# replays every recorded bypass (BreachTracker.replay_set_for, uncapped).
 BYPASS_SAMPLE_LIMIT = int(os.environ.get("BYPASS_SAMPLE_LIMIT", 20))
 BYPASS_SAMPLES_PER_SEED = int(os.environ.get("BYPASS_SAMPLES_PER_SEED", 2))
 

@@ -207,6 +207,28 @@ def _new_family_samples() -> "defaultdict[str, list]":
     return defaultdict(list)
 
 
+def _upsert_by_marker(entries: list[dict], sample: dict, enrich: bool) -> bool:
+    """Add `sample` to `entries`, keeping one entry per request (identified by
+    its _wave_marker value). An audit sample (`enrich=True`) carries the POST
+    body, so it replaces any existing entry for its marker; an access-log
+    sample (`enrich=False`) is dropped if the marker already has one, so it
+    can never overwrite a body-bearing entry. Returns False if the sample was
+    dropped. Shared by the capped evidence buckets and the uncapped
+    open_bypasses list so both apply the same rule.
+    """
+    marker = sample["marker"]
+    if marker:
+        # Exact comparison, not a substring test: "...-02-3" is a
+        # substring of "...-02-30".
+        existing = next((s for s in entries if s["marker"] == marker), None)
+        if existing is not None:
+            if not enrich:
+                return False
+            entries.remove(existing)
+    entries.append(sample)
+    return True
+
+
 def _extract_blocked_endpoint(line: str) -> str | None:
     """Pull just the URL path out of an error-log line, dropping the query
     string so e.g. two attacks with different `?_wave_marker=...` values
@@ -480,6 +502,20 @@ class BreachTracker:
         self._protected: dict[str, list[dict]] = {
             ep: list(entries) for ep, entries in state.get("protected", {}).items()
         }
+        # open_bypasses (2026-11-19): every bypass recorded for an endpoint
+        # since its last PASS, uncapped, one entry per request. This is what
+        # verify_rule replays. The capped _bypass_samples buckets stay as the
+        # agent's evidence only. Before this, verify_rule replayed the capped
+        # bucket, so a bypass the per-seed cap had evicted was never replayed
+        # and never reached the protected list (seen live 2026-11-19: 8 login
+        # bypasses, 7 replayed; mcp-server/docs/future-improvements.md).
+        # mark_mitigated() moves the verified entries into `protected`, which
+        # keeps this list in step with handled_counts. `state` is already {}
+        # here if the checkpoint was stale, so a stale restart clears it too.
+        self._open_bypasses: dict[str, list[dict]] = {
+            ep: [_coerce_sample(e) for e in entries]
+            for ep, entries in state.get("open_bypasses", {}).items()
+        }
         if error_stale or access_stale or audit_stale:
             self._blocked_counts: dict[str, int] = defaultdict(int)
             self._bypass_counts: dict[str, int] = defaultdict(int)
@@ -559,6 +595,7 @@ class BreachTracker:
             },
             "handled_counts": self._handled_counts,
             "protected": self._protected,
+            "open_bypasses": self._open_bypasses,
         }
         # Write to a temp file and rename over the real one so a crash
         # mid-write can't leave a half-written, unparseable state file behind
@@ -568,16 +605,24 @@ class BreachTracker:
         tmp_path.write_text(json.dumps(payload))
         tmp_path.replace(state_path)
 
+    def _record_bypass(self, endpoint: str, family: str, sample: dict, enrich: bool) -> None:
+        """Record one bypass sample in both places it belongs: the endpoint's
+        uncapped open_bypasses list (what verify_rule replays) and its capped
+        (endpoint, family) evidence bucket (what the agent reads). Both use the
+        same one-entry-per-request rule (_upsert_by_marker), so a POST's audit
+        entry upgrades its bodiless access-log entry in both.
+        """
+        _upsert_by_marker(self._open_bypasses.setdefault(endpoint, []), sample, enrich)
+        self._add_sample(endpoint, family, sample, enrich)
+
     def _add_sample(self, endpoint: str, family: str, sample: dict, enrich: bool) -> None:
         """Add a sample to its (endpoint, family) bucket, with two policies.
 
-        **One entry per request** (identified by its _wave_marker value). The
-        access log and the audit log both describe the same request; for a
-        POST the access-log line is just a bare URI while the audit entry
-        carries the body. Storing both would waste slots on one request. So an
-        audit sample (`enrich=True`) replaces any existing sample for its
-        marker, and an access-log line (`enrich=False`) is dropped if the
-        marker already has one.
+        **One entry per request** (identified by its _wave_marker value; see
+        _upsert_by_marker). The access log and the audit log both describe the
+        same request; for a POST the access-log line is just a bare URI while
+        the audit entry carries the body. Storing both would waste slots on
+        one request.
 
         **Diversity across seeds, not recency.** A plain "keep the last N"
         buffer shows the agent whichever mutation family happened to bypass
@@ -590,16 +635,8 @@ class BreachTracker:
         thinned first.
         """
         bucket = self._bypass_samples[endpoint][family]
-        marker = sample["marker"]
-        if marker:
-            # Exact comparison, not a substring test: "...-02-3" is a
-            # substring of "...-02-30".
-            existing = next((s for s in bucket if s["marker"] == marker), None)
-            if existing is not None:
-                if not enrich:
-                    return
-                bucket.remove(existing)
-        bucket.append(sample)
+        if not _upsert_by_marker(bucket, sample, enrich):
+            return
 
         seed = sample["seed"]
         same_seed = [s for s in bucket if s["seed"] == seed]
@@ -657,7 +694,7 @@ class BreachTracker:
                 # No body or content-type here (nginx's access log has
                 # neither), so this is only replayable if it's a bodiless
                 # GET; a POST gets upgraded when its audit entry arrives.
-                self._add_sample(
+                self._record_bypass(
                     endpoint, family, _make_sample(text, method=method, uri=uri), enrich=False
                 )
 
@@ -690,7 +727,7 @@ class BreachTracker:
                 # the access line where counts are sourced - documented
                 # residual in the Sprint 4.6 notes.)
                 continue
-            self._add_sample(endpoint, family, sample, enrich=True)
+            self._record_bypass(endpoint, family, sample, enrich=True)
 
         if new_error_lines or new_access_lines or new_audit_lines:
             self._save_state()
@@ -698,13 +735,23 @@ class BreachTracker:
         return dict(self._blocked_counts), dict(self._bypass_counts)
 
     def samples_for(self, endpoint: str) -> list[dict]:
-        """Every structured bypass sample held for `endpoint` (all attack
-        families), after pulling in any newly logged activity. Server-side
-        only - these records carry full request bodies and are what
-        rule_verifier replays; the agent only ever sees their `text`.
+        """Every structured sample in `endpoint`'s capped evidence buckets (all
+        attack families), after pulling in any newly logged activity. This is
+        the agent's evidence (it only ever sees each sample's `text`), not
+        what verify_rule replays - that's replay_set_for().
         """
         self.poll()
         return [s for entries in self._bypass_samples.get(endpoint, {}).values() for s in entries]
+
+    def replay_set_for(self, endpoint: str) -> list[dict]:
+        """Every bypass recorded for `endpoint` since its last verified rule,
+        uncapped, after pulling in any newly logged activity. This is what
+        verify_rule replays, so a PASS means the rule blocks every recorded
+        bypass, including ones the evidence cap kept out of the agent's view.
+        Server-side only: these records carry full request bodies.
+        """
+        self.poll()
+        return list(self._open_bypasses.get(endpoint, []))
 
     def status(self, endpoint: str | None = None) -> dict:
         """Return the current blocked/bypass tallies plus which endpoints
@@ -756,6 +803,12 @@ class BreachTracker:
         2. Every replayable sample the PASS just confirmed as blocked joins
            the endpoint's protected list (deduped by marker), so any later
            rewrite that stops blocking one of them fails verification.
+        3. Those same requests leave the endpoint's open_bypasses list - they
+           are "handled" now, matching effect 1. Removed by marker, so only
+           what this PASS actually replayed goes; anything that arrived after
+           the replay stays open. Non-replayable entries are removed too (a
+           bodiless POST can never be replayed, so keeping it changes nothing
+           but the not_replayable count).
         """
         self._handled_counts[endpoint] = self._bypass_counts.get(endpoint, 0)
         protected = self._protected.setdefault(endpoint, [])
@@ -764,6 +817,11 @@ class BreachTracker:
             if is_replayable(sample) and sample["marker"] not in known:
                 protected.append(sample)
                 known.add(sample["marker"])
+        verified = {s["marker"] for s in verified_samples}
+        if endpoint in self._open_bypasses:
+            self._open_bypasses[endpoint] = [
+                s for s in self._open_bypasses[endpoint] if s["marker"] not in verified
+            ]
         self._save_state()
 
     def protected_samples(self) -> list[dict]:

@@ -80,3 +80,38 @@ report.
   entries that shouldn't block a PASS.
 - **Add rules instead of replacing them.** Give new patterns new IDs, so old rules stay untouched.
   This changes the one-rule-per-endpoint design and lets the rule file grow.
+
+## ✅ Sample cap drops bypasses from verification and the protected list — BUILT (2026-11-19, not yet live-tested)
+
+**Found in** the 2026-11-19 re-check (`docs/post-review-fixes.md`, "Result — 2026-11-19 re-check").
+`verify_rule` replays an endpoint's **sample bucket**, not every bypass. The bucket keeps at most
+`BYPASS_SAMPLES_PER_SEED` (2) per seed, dropping the oldest (`BreachTracker._add_sample`). In that run,
+login had 8 bypasses but only 7 were replayed: seed `sqli-02` bypassed 3 times, and
+`w1-sqli-02-1` (email `␠OR 1=1 /* '1'='1 */`, with a leading space; status **500**) was dropped.
+
+Why it matters:
+- **Verification.** A PASS shows the rule blocks the *samples*, not every recorded bypass. The
+  `rule_verifier.py` docstring already says this ("a fit check").
+- **Protected list (coverage check).** At PASS, the protected list is filled from the same samples, so
+  a dropped bypass is **never** re-checked on later rewrites. The uncapped coverage check has a blind
+  spot of exactly what the cap dropped.
+- **Which one gets dropped.** The cap drops the oldest sample regardless of status code, so a 500
+  (the request probably reached the DB) can be dropped while a 401 is kept.
+
+In that run there was no actual harm: replaying the dropped request after the run got a 403 from
+`1000000` alone. The gap is structural, and a later rewrite could lose that coverage without anything
+noticing.
+
+**Decision (2026-11-19): the first option, keep every bypass for replay. Built the same day.** See
+`docs/post-review-fixes.md` §6. Offline-tested; no live run yet.
+
+**Options considered:**
+- **Keep every bypass for replay; cap only what the agent sees.** *(chosen)* Store all bypasses (by marker) in a
+  separate uncapped list per endpoint. `verify_rule` replays all of them, and at PASS all of them go
+  into the protected list. The capped, diversity-chosen bucket stays as the agent's prompt evidence.
+  This is the same split the 2026-11-13 protected-list option described. Cost: replay time grows with
+  the number of bypasses (tens per run at current sizes, so small).
+- **Status-aware dropping.** When the cap has to drop one, drop a 401/200 before a 500. Cheaper, but
+  bypasses still go missing; it only changes which ones.
+- **Report it.** Have `verify_rule` return `bypasses_recorded` next to `replayed`, so the shortfall
+  shows up in transcripts even if nothing else changes.

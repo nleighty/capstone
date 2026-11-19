@@ -238,6 +238,60 @@ class TripSinceLastRule(TrackerCase):
         self.assertTrue(all(s["method"] == "GET" for s in protected))
 
 
+class ReplaySetUncapped(TrackerCase):
+    """2026-11-19 fix: verify_rule replays every bypass since the last PASS,
+    not just the capped evidence bucket (live re-check: 8 login bypasses, 7
+    replayed, because seed sqli-02 bypassed 3 times with a per-seed cap of 2)."""
+
+    # The 2026-11-19 run's login bypasses, by seed: 01 x2, 02 x3, 03 x1, 08 x2.
+    MARKERS = ["w1-sqli-01-1", "w1-sqli-02-1", "w1-sqli-08-1", "w1-sqli-02-2",
+               "w2-sqli-01-1", "w2-sqli-02-1", "w2-sqli-03-1", "w2-sqli-08-2"]
+
+    @staticmethod
+    def ids(samples):
+        """Marker values without the stored `_wave_marker=` prefix."""
+        return [s["marker"].removeprefix("_wave_marker=") for s in samples]
+
+    def fire_login(self, markers):
+        for m in markers:
+            self.feed("access", access_line(m))
+            self.feed("audit", audit_line(m, f'{{"email":"{m} OR 1=1"}}'))
+
+    def test_replay_set_keeps_what_the_seed_cap_evicts(self):
+        self.fire_login(self.MARKERS)
+        self.assertEqual(len(self.tracker.samples_for(EP)), 7)  # capped evidence, as live
+        replay = self.tracker.replay_set_for(EP)
+        self.assertEqual(len(replay), 8)
+        self.assertIn("w1-sqli-02-1", self.ids(replay))  # the one the cap dropped
+
+    def test_one_entry_per_request_with_body(self):
+        self.fire_login(self.MARKERS[:1])
+        replay = self.tracker.replay_set_for(EP)
+        self.assertEqual(len(replay), 1)  # access + audit lines are the same request
+        self.assertIsNotNone(replay[0]["body"])  # audit entry upgraded the bodiless access one
+        self.assertTrue(log_parser.is_replayable(replay[0]))
+
+    def test_pass_moves_replay_set_to_protected_and_survives_restart(self):
+        self.fire_login(self.MARKERS)
+        replay = self.tracker.replay_set_for(EP)
+        self.tracker.mark_mitigated(EP, replay)
+        self.assertEqual(self.tracker.replay_set_for(EP), [])
+        self.assertEqual(len(self.tracker.protected_samples()), 8)  # evicted one included
+
+        self.fire_login(["w3-sqli-05-1"])
+        restarted = self.new_tracker()
+        self.assertEqual(self.ids(restarted.replay_set_for(EP)), ["w3-sqli-05-1"])
+        self.assertEqual(len(restarted.protected_samples()), 8)
+
+    def test_pass_only_clears_what_it_replayed(self):
+        self.fire_login(self.MARKERS[:2])
+        replay = self.tracker.replay_set_for(EP)
+        self.fire_login(["w2-sqli-04-1"])  # arrives after the replay snapshot
+        self.tracker.poll()
+        self.tracker.mark_mitigated(EP, replay)
+        self.assertEqual(self.ids(self.tracker.replay_set_for(EP)), ["w2-sqli-04-1"])
+
+
 class MeaningfulLen(unittest.TestCase):
     def test_looks_through_json_envelope(self):
         self.assertEqual(log_parser._meaningful_len('{"comment":"["}'), 1)

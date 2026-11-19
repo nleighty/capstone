@@ -131,8 +131,9 @@ def reload_waf() -> str:
 def verify_rule(endpoint: str) -> dict:
     """Check whether the rule(s) now live actually work, for one endpoint
     (URL path, e.g. "/rest/user/login"). Call this AFTER reload_waf(): it
-    re-sends the requests previously recorded as bypassing the WAF for that
-    endpoint, and a small fixed set of ordinary requests, through the live WAF.
+    re-sends every request recorded as bypassing the WAF for that endpoint
+    since its last verified rule (including ones not in the sample you were
+    shown), and a small fixed set of ordinary requests, through the live WAF.
 
     Reports (a) attack_replay.still_bypassing - recorded attacks that still
     get through (gaps in your rule), and (b) benign_check.falsely_blocked -
@@ -146,7 +147,9 @@ def verify_rule(endpoint: str) -> dict:
     verdict means the rule covers the evidence it was written from - not that
     it covers unseen variants.
     """
-    samples = _breach_tracker.samples_for(endpoint)
+    # Every bypass since the endpoint's last PASS, not just the capped sample
+    # set the agent was shown (see BreachTracker.replay_set_for).
+    samples = _breach_tracker.replay_set_for(endpoint)
     try:
         report = rule_verifier.verify(endpoint, samples, _breach_tracker.protected_samples())
     except OSError as exc:

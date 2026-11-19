@@ -33,8 +33,11 @@ Design constraints worth knowing:
   log_parser._extract_blocked_endpoint for the matching exclusion on the
   error-log side, which has no marker check.
 - **This is a fit check, not a generalization check.** The replayed requests
-  are the same ones the agent saw while writing the rule, so passing proves the
-  rule covers its evidence, not that it covers unseen variants - that is what
+  are every recorded bypass since the endpoint's last verified rule
+  (BreachTracker.replay_set_for). Most are ones the agent saw while writing the
+  rule; the rest are recorded bypasses the evidence cap kept out of its view
+  (2026-11-19). So passing proves the rule covers the recorded bypasses, not
+  that it covers unseen variants - that is what
   the independent harness's RGI measures in Sprint 5. The benign set here is
   likewise small and defender-side; the harness's RFPR set (50-100 requests,
   docs/design-notes.md) stays separate so the final metric isn't graded by the
@@ -121,8 +124,8 @@ def _send(method: str, uri: str, body: str | None, content_type: str | None) -> 
 
 
 def verify(endpoint: str, samples: list[dict], protected: list[dict] | None = None) -> dict:
-    """Replay `samples` (BreachTracker's structured bypass records for
-    `endpoint`) and the endpoint's benign set against the live WAF, and
+    """Replay `samples` (BreachTracker.replay_set_for: every bypass recorded
+    for `endpoint` since its last verified rule) and the endpoint's benign set against the live WAF, and
     return a structured report. Call only after reload_waf(): a rule that is
     written but not yet reloaded isn't live, so every replay would just
     re-confirm the old gaps.
@@ -131,8 +134,8 @@ def verify(endpoint: str, samples: list[dict], protected: list[dict] | None = No
     earlier verified rule was confirmed to block, on any endpoint. Each one
     that gets through now is a *regression* (lost coverage) and fails the
     verdict. This is the code-enforced fix for "rule rewrites can lose old
-    coverage without anything noticing": the capped `samples` alone can't
-    catch it, because old evidence gets evicted from them.
+    coverage without anything noticing": `samples` alone can't catch it,
+    because they only hold bypasses since the endpoint's last PASS.
     """
     # nginx's `-s reload` returns once the signal is sent; new workers pick up
     # the new ruleset asynchronously. Without a short settle, an immediate

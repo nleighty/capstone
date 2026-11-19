@@ -82,6 +82,12 @@ source .venv/bin/activate
 python3 reset_state.py
 docker exec waf nginx -s reload
 ```
+Expect the server's startup warning `modsec_audit.log: no checkpoint, but file already has N bytes`
+even right after a reset: the `waf` container's Docker healthcheck hits `/healthz` every 30s and
+ModSecurity audit-logs each one, so the audit log is non-empty within seconds. That's harmless — the
+warning only matters if attack traffic fired before the server started. Same for a stray manual
+`curl` sanity check landing in `access.log`/`error.log` between the reset and the server start.
+
 If `server.py` is already running when you do this, stop and restart it afterward — it only reads
 the state file at startup, so a reset while it's running won't be picked up until it restarts.
 

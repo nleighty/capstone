@@ -6,14 +6,18 @@ reachable from WSL at the time), then **live-checked the same day with a 3-wave 
 See "Live check" at the bottom. That's a smoke test, not an evaluation run.
 
 **Plan to the baseline rerun (agreed 2026-11-19), in order:**
-1. **Live re-check** of the two post-smoke-run changes (agent after the last wave; `nothing tripped`
-   rows), with the console output saved to `defensive-agent/docs/transcripts/`.
+1. ✅ **Live re-check** of the two post-smoke-run changes (agent after the last wave; `nothing tripped`
+   rows), with the console output saved to `defensive-agent/docs/transcripts/`. Passed 2026-11-19,
+   see "Result — 2026-11-19 re-check" at the bottom.
 2. **Adaptive attacker (`run.py --adaptive`)**, the advisor's "game theory" suggestion (2026-11-13).
    Each wave's per-seed results (got through vs. 403) are fed back into the next wave's mutation prompt
    ("more like these, avoid those"), with a few examples per seed. The attacker learns **only from status
    codes** it sees on its own requests, never from `matched_rule_id`, logs, or rules, which keeps it a
    black-box attacker. Off by default, so the fixed attacker stays available for comparison. Offline tests
    with a fake model, then a short live check. Prompt-injection as an attacker strategy is *not* included.
+   **That live check also covers §6** (uncapped replay set, built 2026-11-19): restart `server.py`
+   first, then confirm each `verify_rule` result's `attack_replay.replayed` equals the endpoint's
+   `bypasses_since_rule` (minus `not_replayable`).
 3. **Runner CLI** for the whole system: bring up Docker, check Ollama, start the MCP server, reset
    state, run waves with or without `--defend`, and summarize the CSVs. It prints each underlying command
    before running it, so a user can see what it's doing without typing the commands by hand. It
@@ -110,13 +114,35 @@ come up short silently.
 - A wave that's still short is fired anyway with a printed WARNING. The CSV row count shows the
   real size.
 
+## 6. `verify_rule` replays every bypass, not the capped sample (2026-11-19)
+
+**Before:** `verify_rule` replayed the endpoint's evidence bucket, which keeps at most 2 bypasses per
+seed. A bypass the cap dropped was never replayed and never added to the protected list. Seen live in
+the 2026-11-19 re-check: 8 login bypasses, 7 replayed.
+**Now:** `BreachTracker` also keeps **`open_bypasses`**: every bypass per endpoint since its last
+PASS, uncapped, one entry per request (the same marker dedupe as the buckets, now shared through
+`_upsert_by_marker`). `verify_rule` replays that list (`replay_set_for`). At PASS, `mark_mitigated`
+adds those requests to the protected list and removes them from `open_bypasses`, so the list stays in
+step with `handled_counts`.
+
+- The agent's view doesn't change: `sample_bypasses` is still the capped, diversity-chosen bucket.
+  `still_bypassing` can now list a request the agent wasn't shown; its full text is in the result.
+- The list is saved in the state file. `reset_state.py` deletes that file, so it needs no change. A
+  stale (truncated-log) restart clears the list along with the counts.
+- PASS removes only the requests it replayed. A bypass that arrives after the replay stays open.
+- Tests: 4 new in `mcp-server/tests/test_log_parser.py` (`ReplaySetUncapped`). They rebuild the
+  2026-11-19 case (8 bypasses, 7 shown, 8 replayed) and cover the access+audit merge, PASS → protected
+  surviving a restart, and the late arrival. 33 total, all passing.
+- **Live check still to do, folded into the adaptive attacker's live check** (plan item 2): restart `server.py` first. In a `--defend` run, `attack_replay.replayed`
+  should equal the endpoint's `bypasses_since_rule` (minus `not_replayable`).
+
 ---
 
 ## Tests (all offline)
 
 | Subproject | Run from it | New tests |
 |---|---|---|
-| `mcp-server` | `python -m unittest discover -s tests -t .` | trip-since-rule, protected list persistence, regression → FAIL, no double replay (29 total) |
+| `mcp-server` | `python -m unittest discover -s tests -t .` | trip-since-rule, protected list persistence, regression → FAIL, no double replay; uncapped replay set (§6) (33 total) |
 | `defensive-agent` | same | first test suite: model can't pass rule_id/endpoint, code fills them in, verdict summary (5) |
 | `attacker-pipeline` | same | every seed fires, exact size, extra rotates evenly, top-up, broken model doesn't hang (21 total) |
 
@@ -154,3 +180,53 @@ rule ID, not by endpoint.
 
 Not built (still open): `not_replayable` doesn't fail PASS (`mcp-server/docs/future-improvements.md`),
 degenerate POST still nudges the count, the attacker doesn't learn from results.
+
+### Result — 2026-11-19 re-check (`run_recheck_20261119_100200*.csv`)
+Re-check of the two changes made after the smoke run (agent also runs after the last wave; a pass with
+nothing tripped writes a row). Same command shape: `reset_state.py` → `server.py` →
+`PYTHONUNBUFFERED=1 python3 run.py --waves 3 --wave-size 20 --defend --label recheck 2>&1 | tee …`.
+Full console output: `defensive-agent/docs/transcripts/recheck-20261119_100159.txt`. All three checks
+passed. Each was read from the files, not from the console.
+
+| Wave | Bypassed | Agent pass (`_agent.csv`) |
+|---|---|---|
+| 1 | 5/20 (4 `/rest/user/login`: two 401, two 500; 1 `/rest/products/search`: 500) | `(none tripped)`, `nothing tripped`. Login at 4 < threshold 5 |
+| 2 | 4/20 (all `/rest/user/login`, 401) | login tripped (8 total) → rule `1000000`, FAIL→revise→PASS, 2 `verify_rule` attempts, `mttm_seconds` = 93.5 |
+| 3 | **0/20** (3 of the 20 403s attributed to `1000000`) | `(none tripped)`, `nothing tripped`. **This last-wave row is the new behavior** |
+
+1. **`_agent.csv` has a row for every wave, including the last.** Waves 1 and 3 are `nothing tripped`
+   rows. Before the change, wave 1 would have left no row and wave 3 would not have run at all.
+2. **Prompt caching works.** There is exactly one token-usage line, because only wave 2's pass called
+   the model. A `nothing tripped` pass exits before any model call (`agent.py`, "No tripped endpoints"),
+   so it prints no usage line. The one line: 10 calls, input=106687, **cache_read=93266**,
+   cache_write=13401, uncached=20, output=5575.
+3. **The verify FAIL reason is in the transcript.** The full `verify_rule` JSON is printed. The first
+   attempt blocked 7/7 replayed attacks but returned `FAIL: 1 benign request(s) are now blocked`, with
+   `falsely_blocked`: `POST /api/Feedbacks {"comment": "Loved the 'juice' #1 shop", …}`. This is the
+   same benign case as the first attempt in the 11-13 smoke run (the quote-then-`#` terminator
+   alternative). The revision passed with 0 false positives and `coverage_check.regressions` empty
+   (`protected_replayed` = 0, since this was the first PASS of the run, so there was nothing to
+   regress yet).
+
+Also seen:
+- No 403 row has an empty `matched_rule_id`.
+- The model's `generate()` timed out once (90s) in wave 2's mutation. The top-up still delivered a
+  full 20-payload wave.
+- The server's startup warning `modsec_audit.log … already has N bytes` after a reset comes from the
+  WAF container's Docker healthcheck (`/healthz` every 30s) and is harmless. This is now noted in
+  `docs/common-commands.md`.
+- **`verify_rule` replayed 7 requests, but login's tally was 8. This is the per-seed sample cap, not
+  a bug.** `verify_rule` replays the sample bucket, not every bypass, and `BYPASS_SAMPLES_PER_SEED` = 2
+  (`mcp-server/config.py`, applied in `BreachTracker._add_sample`). Seed `sqli-02` bypassed 3 times
+  (`w1-sqli-02-1`, `w1-sqli-02-2`, `w2-sqli-02-1`), so the oldest one (`w1-sqli-02-1`, body below)
+  was dropped. The other seeds (`01` ×2, `03` ×1, `08` ×2) fit under the cap: 2+2+1+2 = 7. What follows
+  from this: (a) `verify_rule` checks the rule against its samples, not against every bypass. That's
+  already stated in `rule_verifier.py`'s docstring; this is a concrete case of it. (b) The
+  **protected list is filled from the same samples**, so a dropped bypass is never re-checked by the
+  coverage check on later rewrites. (c) Eviction is oldest-first and ignores the status code, and the
+  dropped request was a **500**: it likely reached the database, which is worse than a 401. **No harm
+  in this run, confirmed live after the run:** re-sending the exact wave-1 body
+  (`{"email": " OR 1=1 /* '1'='1 */", "password": "x"}`, copied from the audit log, no wave marker)
+  gives a 403, and the audit entry lists **only `1000000`**, with no CRS score. So the AI rule covers
+  it, and CRS alone still doesn't. That only shows this case was covered; the gap still exists. Fixed
+  the same day (§6): `verify_rule` now replays every bypass since the last PASS.
