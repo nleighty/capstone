@@ -5,11 +5,30 @@ auto-trigger that was parked in Sprint 4.6 (#5c). Built and unit-tested offline 
 reachable from WSL at the time), then **live-checked the same day with a 3-wave smoke run, which passed**.
 See "Live check" at the bottom. That's a smoke test, not an evaluation run.
 
-**Next planned step (2026-11-13): a single runner script/CLI** for the whole system: bring up Docker,
-check Ollama, start the MCP server, reset state, run waves with or without `--defend`, and summarize the
-CSVs. It prints each underlying command before running it, so a user can see what it's doing, but
-doesn't have to type the commands by hand. It would replace the `--smoke-test`-flag idea in
-`attacker-pipeline/docs/future-improvements.md`.
+**Plan to the baseline rerun (agreed 2026-11-19), in order:**
+1. **Live re-check** of the two post-smoke-run changes (agent after the last wave; `nothing tripped`
+   rows), with the console output saved to `defensive-agent/docs/transcripts/`.
+2. **Adaptive attacker (`run.py --adaptive`)**, the advisor's "game theory" suggestion (2026-11-13).
+   Each wave's per-seed results (got through vs. 403) are fed back into the next wave's mutation prompt
+   ("more like these, avoid those"), with a few examples per seed. The attacker learns **only from status
+   codes** it sees on its own requests, never from `matched_rule_id`, logs, or rules, which keeps it a
+   black-box attacker. Off by default, so the fixed attacker stays available for comparison. Offline tests
+   with a fake model, then a short live check. Prompt-injection as an attacker strategy is *not* included.
+3. **Runner CLI** for the whole system: bring up Docker, check Ollama, start the MCP server, reset
+   state, run waves with or without `--defend`, and summarize the CSVs. It prints each underlying command
+   before running it, so a user can see what it's doing without typing the commands by hand. It
+   includes a **`test` command** that runs all three subprojects' unit tests the same way. It replaces
+   the `--smoke-test`-flag idea in `attacker-pipeline/docs/future-improvements.md`.
+4. **Test coverage:** add `coverage.py` to each venv, measure, and test every function's logic, with
+   Docker/Ollama/Claude/HTTP replaced by stand-ins. Report the coverage number per subproject. A
+   literal 100% isn't the goal; the live runs cover the real services.
+5. **Comment pass**, one subproject per chat, after the tests exist: comment every line that isn't
+   self-explanatory to someone newer to Python (regexes, library calls, idioms, magic numbers, order
+   dependencies). Not every line: comments that just repeat the code go stale. Update the comment
+   convention in `CLAUDE.md` when this starts. First thing to cut if time runs short.
+6. Evaluation runs: A = fixed attacker vs. CRS only (the baseline rerun), B = fixed attacker vs. CRS +
+   agent (`--defend`), C = adaptive attacker vs. CRS + agent (`--defend --adaptive`, the "you get better, I
+   get better" comparison). Then the RGI script.
 
 ---
 

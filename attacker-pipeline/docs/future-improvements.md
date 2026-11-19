@@ -48,6 +48,8 @@ claim doesn't hold. Every baseline wave happened to be 50, but α compares waves
 
 ## Attacker doesn't learn from results (found 2026-11-12, Step 3 review)
 
+**Planned 2026-11-19** as `run.py --adaptive` (feedback from status codes only); see `../../docs/post-review-fixes.md`, "Plan to the baseline rerun" step 2.
+
 The attacker is open-loop. Every wave sends the same 16 seeds and the same prompt to Llama, and
 nothing about which variants got through or were blocked goes back in. Variation between waves is just
 sampling noise. The advisor's "you get better, I get better" direction (`docs/meeting-notes.md`,

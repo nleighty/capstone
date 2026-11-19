@@ -86,3 +86,21 @@ Reading of the notes (an interpretation, not the advisor's words):
   sense of how predictable the offensive side is.
 - The full four-metric multi-wave suite wasn't explicitly required or ruled out. What to build next
   (if anything) is still Nic's decision during the code-review sprint, but the automation of the MCP client/agent is the important building block to do.
+
+## 2026-11-13 — Post-review fixes + first closed-loop smoke run
+
+Presented the code review, the post-review fixes, and the 3-wave `--defend` smoke run (run-sheet:
+`docs/advisor-meeting-2026-11-13.md`). Advisor was fine with the RGI redefinition (added value
+over CRS).
+
+**Advisor suggestion: the "game theory" side.** It would be nice if the offensive side also tries
+to improve over waves, which is the same "you get better, I get better" direction as 2026-10-30. Open
+question (Nic's): what does that look like when the attacker can't see the defender's patches? Notes
+for when this is scoped:
+- The attacker doesn't need to see the rules. It sees *outcomes* (403 = blocked, anything else =
+  got through), which is the same black-box feedback a real attacker has. Feeding the last wave's
+  bypasses and blocks back into the mutation prompt is the simplest form. Already scoped as "Attacker
+  doesn't learn from results" in `attacker-pipeline/docs/future-improvements.md`.
+- Log-borne prompt injection (`docs/sprint-4.6-direction.md` §3) is a possible attacker *strategy*:
+  targeting the defender model instead of the WAF.
+- Not yet decided whether this is in scope before December.
