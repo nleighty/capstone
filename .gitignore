@@ -22,3 +22,6 @@ node_modules/
 
 # Claude Code runtime state (session locks, etc.) — not meant to be versioned
 .claude/
+
+# Runner (background MCP server pid/log, run transcripts)
+runner/state/

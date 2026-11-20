@@ -10,8 +10,11 @@ file is about *ideas for later*.
 Originally noted as inline comments in `run.py`; moved here so `docs/common-commands.md` can stay a
 pure "how to run what already exists" reference rather than mixing in a backlog.
 
-- **`--smoke-test` flag** — one flag that sets the smoke-test values (`--waves 1 --wave-size 5
-  --pause 0`) instead of having to remember/retype the exact numbers every time.
+- ~~**`--smoke-test` flag**~~ — **replaced 2026-11-20 by the runner CLI** (`runner/runner.py`,
+  `docs/post-review-fixes.md` plan item 3), which shows the smoke-test command and prints the exact
+  `run.py` flags it passes. Not built as a `run.py` flag. Original idea: one flag that sets the
+  smoke-test values (`--waves 1 --wave-size 5 --pause 0`) instead of having to remember/retype the
+  exact numbers every time.
 - **Print `config.py`'s current defaults without opening the file** — e.g. folded into `--help`,
   so `python run.py --help` shows the actual `WAVE_SIZE`/`NUM_WAVES`/`WAVE_PAUSE_SECONDS` values
   currently in effect, not just the flag descriptions.

@@ -20,8 +20,16 @@ from harness import bypass_analysis
 
 
 def _latest_csv() -> str | None:
-    candidates = sorted(glob.glob(os.path.join(config.METRICS_DIR, "*.csv")))
-    return candidates[-1] if candidates else None
+    """Newest wave-metrics CSV by modification time.
+
+    Not by filename: labels come first in the name (run_<label>_<ts>.csv), so
+    a name sort orders by label, not time. Also skips the `_agent.csv` files
+    that --defend writes next to each run, which have a different schema
+    (one row per defensive-agent pass, not per payload). Fixed 2026-11-20.
+    """
+    candidates = [p for p in glob.glob(os.path.join(config.METRICS_DIR, "*.csv"))
+                  if not p.endswith("_agent.csv")]
+    return max(candidates, key=os.path.getmtime) if candidates else None
 
 
 def _load_rows(paths: list[str]) -> list[dict]:

@@ -8,7 +8,6 @@ import argparse
 from harness.orchestrator import run
 
 # Potential future: include a `--help` flag that prints the config.py defaults, so a user can see what the baseline-capture settings are without opening the file.
-# Potential future: include a `--smoke-test` flag that sets the above smoke-test values, so a user can run a quick test without remembering the exact numbers.
 
 def main():
     parser = argparse.ArgumentParser(description="Fire attack waves at the WAF and record baseline metrics.")

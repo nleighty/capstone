@@ -4,6 +4,42 @@ Day-to-day operation reference for the WAF environment, Ollama, and the attacker
 narrated advisor-demo script, see `docs/demo-walkthrough.md`; for what each piece actually is, see
 `waf-defense/docs/Sprint1_Summary.md` and `attacker-pipeline/docs/Sprint2_Summary.md`.
 
+## Runner (the easy way)
+
+`runner/runner.py` wraps everything below in one tool. It needs only plain `python3` (it calls each
+subproject's own venv). **Every subcommand prints the exact shell command(s) before running them**,
+so this section and the manual sections below always agree. Add `--dry-run` to any subcommand to
+print the commands without running anything, and `--help` to see its options.
+
+A fresh closed-loop run, in order:
+```bash
+cd ~/capstone
+python3 runner/runner.py check               # Docker, Ollama+llama3, MCP server, API key (OK/FAIL each)
+python3 runner/runner.py up                  # only if Docker isn't up
+python3 runner/runner.py reset               # clean slate; sudo prompts for your password
+python3 runner/runner.py server start        # MCP server in the background; shows its startup lines
+python3 runner/runner.py run --waves 3 --wave-size 20 --defend --label smoke --tee
+python3 runner/runner.py summary             # newest run: per-wave bypasses, agent MTTM, analyze.py
+```
+
+| Command | Does |
+|---|---|
+| `up` / `down` | `docker compose up -d` / `down` for the WAF + Juice Shop |
+| `check` | Read-only readiness report. The API key is reported as set/not set, never printed |
+| `server start\|stop\|restart\|status\|log` | MCP server as a background process; PID + log in `runner/state/` (`log` follows it, Ctrl+C to stop following) |
+| `reset [--restart-server]` | `reset_state.py` + `nginx -s reload`. `--restart-server` stops and restarts a runner-started server around the reset |
+| `run [...]` | `attacker-pipeline/run.py`, same flags (`--waves --wave-size --pause --label --defend --adaptive`) plus `--adaptive-debug` (sets `ADAPTIVE_DEBUG=1`) and `--tee [PATH]` (save the console; default `runner/state/transcripts/<label>-<timestamp>.txt`). Unset flags use `config.py` defaults (5 waves × 50, 60 s pause). `--defend` checks the server is up first |
+| `summary [CSV]` | Per-wave bypass table + `_agent.csv` rows, then `analyze.py`. Default: newest wave CSV by time |
+| `test` | All three subprojects' unit tests in their own venvs, plus the runner's; PASS/FAIL per suite |
+
+Quick smoke test (what the old `--smoke-test` idea was for):
+`python3 runner/runner.py run --waves 1 --wave-size 5 --pause 0 --label smoke`
+
+The rest of this file is the **manual reference**: what the runner runs, for when you want to do a
+step by hand or understand it.
+
+---
+
 Sections below are in the order you'd actually run them for a fresh test: infra up, MCP server up
 (it reads logs from an offset captured at startup, so it must be running *before* traffic fires or
 it silently misses everything already sitting in the logs), then fire traffic, then

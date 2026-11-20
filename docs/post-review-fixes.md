@@ -19,11 +19,12 @@ See "Live check" at the bottom. That's a smoke test, not an evaluation run.
    first, then confirm each `verify_rule` result's `attack_replay.replayed` equals the endpoint's
    `bypasses_since_rule` (minus `not_replayable`). Built and live-checked 2026-11-19, both passed — see
    "Adaptive attacker" below.
-3. **Runner CLI** for the whole system: bring up Docker, check Ollama, start the MCP server, reset
+3. ✅ **Runner CLI** for the whole system: bring up Docker, check Ollama, start the MCP server, reset
    state, run waves with or without `--defend`, and summarize the CSVs. It prints each underlying command
    before running it, so a user can see what it's doing without typing the commands by hand. It
    includes a **`test` command** that runs all three subprojects' unit tests the same way. It replaces
-   the `--smoke-test`-flag idea in `attacker-pipeline/docs/future-improvements.md`.
+   the `--smoke-test`-flag idea in `attacker-pipeline/docs/future-improvements.md`. Built and
+   live-checked 2026-11-20 (`runner/runner.py`), see "Runner CLI" at the bottom.
 4. **Test coverage:** add `coverage.py` to each venv, measure, and test every function's logic, with
    Docker/Ollama/Claude/HTTP replaced by stand-ins. Report the coverage number per subproject. A
    literal 100% isn't the goal; the live runs cover the real services.
@@ -295,3 +296,72 @@ requests. Prompt injection as an attacker *strategy* is deliberately out of scop
 SQLi avenue after wave 1, and the adaptive attacker couldn't reopen it in two short waves. Expected for a
 3-wave smoke run; the real "learning vs. learning" picture comes from the longer eval run C (plan item 6).
 Balanced waves also held: 60 rows, all 16 seeds every wave. This is a smoke check, not an evaluation run.
+
+---
+
+## Runner CLI (`runner/runner.py`, 2026-11-20) — plan item 3
+
+One command-line front end for everything `docs/common-commands.md` does by hand. Every subcommand
+prints the exact shell command(s) as copy-pasteable `$ …` lines before running them, so a viewer can
+follow along without knowing the commands. `--dry-run` (before or after the subcommand) prints them
+and runs nothing, for slides and demos. `--help` works on the runner and on every subcommand.
+
+```
+python3 runner/runner.py <command> [--dry-run]
+  up / down                     docker compose up -d / down (images kept)
+  check                         Docker containers, Ollama + llama3, MCP server, Anthropic key (set/not set, never the value)
+  server start|stop|restart|status|log   MCP server as a background process
+  reset [--restart-server]      reset_state.py (sudo prompts normally) + nginx reload
+  run [--waves --wave-size --pause --label --defend --adaptive --adaptive-debug --tee [PATH]]
+  summary [CSV]                 per-wave bypass table, _agent.csv rows (MTTM), then analyze.py
+  test                          all three subprojects' unit tests (own venvs) + the runner's, PASS/FAIL each
+```
+
+**Design decisions:**
+- **Standard library only**, so it runs with the system `python3` (3.10). It never imports a
+  subproject; it calls each subproject's own `.venv/bin/python`, the same pattern as
+  `harness/defender.py`. No subproject's behaviour changed (one bug fix, below).
+- **Build vs. run are separate.** `*_steps()` functions return `Step` objects (argv + cwd + env + the
+  display line, built together so they can't drift apart); only `execute()` touches the system.
+  `runner/tests/test_runner.py` (26 tests) checks the commands offline and asserts that `--dry-run`
+  never calls `subprocess`.
+- **`server` runs in the background, not in a separate terminal.** Detached (`start_new_session`),
+  PID and log in `runner/state/` (gitignored). `start` waits for the port, then prints the server's
+  startup lines, so the "file already has N bytes" offset warning stays visible. Chosen because the
+  runner can then manage the whole lifecycle (stop/restart, the `--defend` preflight); a new terminal
+  window isn't reliable to open from WSL. `server log` follows the output live when needed.
+- **`run --defend` preflights the MCP server** and refuses to fire if it isn't answering.
+  `PYTHONUNBUFFERED=1` is always set so progress (and the agent subprocess's output) streams live.
+  `--tee` replaces the manual `2>&1 | tee …`; with no path it writes
+  `runner/state/transcripts/<label>-<timestamp>.txt` (copy a keeper into
+  `defensive-agent/docs/transcripts/`).
+- **`reset` warns if the server is running** (it only reads its state file at startup).
+  `--restart-server` stops it, resets, and starts it again, but only for a runner-started server. If
+  the server was started in another terminal, the reset refuses and changes nothing.
+- **`summary`'s "403s by AI rule"** column counts `matched_rule_id >= 1000000`, i.e. only what CRS
+  missed (the 949110 masking finding above), and is labeled that way in the output.
+
+**Bug fixed along the way:** `attacker-pipeline/analyze.py` with no argument picked the "newest" CSV
+by *filename*, which sorts by label rather than time and could land on an `_agent.csv` (different
+schema). It now picks by modification time and skips `_agent.csv`. The runner passes an explicit
+CSV regardless.
+
+**Live check, 2026-11-20:** `check` → all four OK (MCP server was already running from a separate
+terminal). `test` → PASS for all four suites (mcp-server 33, defensive-agent 5, attacker-pipeline 35,
+runner 26). Tiny run: `run --waves 1 --wave-size 5 --pause 0 --label runnertest --tee` → 2/5
+bypassed, CSV `run_runnertest_20261120_132631.csv`, transcript saved. One of its 403s was attributed
+to `1000000`: the rule from the 11-19 runs was still loaded (no reset beforehand, because `reset`
+needs the operator's sudo password). `summary` on it and on `run_adaptive_20261119_124532.csv`
+reproduced the documented numbers (6→2→2 bypassed, MTTM 58.9 s).
+
+**Full-lifecycle check, same day (run by the student):** `reset` → `server start` → `run --waves 2
+--wave-size 10 --defend --label runnercheck --tee` → `summary` → `server stop`
+(`run_runnercheck_20261120_133850*.csv`). All passed: wave 1 had 0 AI-rule 403s (reset cleared the
+old rule); the server log showed only the harmless healthcheck `already has 830 bytes` warning;
+wave 1 = 4/10 bypassed (under threshold → `nothing tripped` row), wave 2 = 1/10 with login tripped
+at 5 → `1000000` FAIL (benign `'juice' #1` feedback blocked, the known case) → revise → PASS, 2
+attempts, MTTM 83.4 s; `replayed` 5 = `bypasses_since_rule` 5 (§6 held); `regressions` empty;
+`cache_read` 74792; `server stop` left it DOWN with the PID file removed. Gap found and fixed the
+same day: the `--tee` transcript held `run.py`'s output only, not the command that produced it. It
+now starts with a `# <timestamp>` line and the full `$ …` command line (test:
+`TeeTranscript`, 27 runner tests).

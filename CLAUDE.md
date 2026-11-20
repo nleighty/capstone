@@ -94,7 +94,8 @@ over this list.
     harness-driven agent auto-trigger (`run.py --defend`), per-endpoint threshold reset after a verified
     rule, the protected replay list against coverage loss, code-bound rule_id/endpoint in the agent, and
     balanced waves. Offline-tested; the live-check steps are at the bottom.
-  - `docs/common-commands.md` — day-to-day operation quick reference (Docker, Ollama, running the
+  - `docs/common-commands.md` — day-to-day operation quick reference: a "Runner" section at the top
+    (`runner/runner.py`), then the manual commands it wraps (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,
     `attacker-pipeline/`, `mcp-server/`, and `defensive-agent/`.
 - `waf-defense/` — Docker environment (target app + ModSecurity WAF), logging, and the
@@ -132,6 +133,14 @@ over this list.
     - `defensive-agent/docs/transcripts/` — saved verbatim agent-run transcripts kept as demo/
       reference artifacts (e.g. `sprint4.5-fail-revise-pass.txt`, the FAIL→revise→PASS run the
       Sprint 4.5 advisor demo walks through).
+- `runner/` — the runner CLI (`runner.py`, built 2026-11-20, plan item 3 in
+  `docs/post-review-fixes.md`): one standard-library-only front end for the whole system (`up`/`down`,
+  `check`, `server start|stop|restart|status|log`, `reset`, `run`, `summary`, `test`, plus `--dry-run`).
+  Prints every underlying shell command before running it, and calls each subproject's own venv
+  Python without changing any subproject. `runner/state/` (gitignored) holds the background MCP
+  server's PID/log and `run --tee` transcripts.
+  - `runner/tests/` — offline tests of the command-building logic (run from `runner/`:
+    `python3 -m unittest discover -s tests -t .`).
 - Future subprojects (automated multi-wave testing / metrics, Sprint 5) will likely land as sibling
   directories here, each with their own `docs/` if needed.
 
