@@ -153,7 +153,7 @@ Fire this only after `server.py` (above) is already running:
 ```bash
 cd ~/capstone/attacker-pipeline
 source .venv/bin/activate
-python3 run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT] [--defend]
+python3 run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT] [--defend] [--adaptive]
 ```
 
 | Flag | Default | Use |
@@ -162,6 +162,8 @@ python3 run.py [--waves N] [--wave-size N] [--pause SECONDS] [--label TEXT] [--d
 | `--wave-size` | `config.WAVE_SIZE` (50) | Payloads per wave |
 | `--pause` | `config.WAVE_PAUSE_SECONDS` (60) | Seconds between waves |
 | `--label` | none | Tags the output filename (`run_<label>_<timestamp>.csv`) — use for demo/rehearsal runs so they're never mistaken for real baseline data |
+| `--defend` | off | Run the defensive agent after every wave (closed loop; MCP server must be running) |
+| `--adaptive` | off | Feed each wave's per-seed results (403 vs. not) back into the next wave's mutation prompt. Black-box: status codes only, never the WAF's rules or logs. Wave 1 is open-loop. Off by default so the fixed attacker stays comparable |
 
 Common invocations:
 - Real baseline capture (defaults): `python3 run.py`
@@ -170,6 +172,10 @@ Common invocations:
 - **Closed loop (attack → defend → attack)**: `python3 run.py --defend` (MCP server must be running;
   `defensive-agent/.env` needs the API key). The agent runs after every wave; results go to
   `metrics/run_<id>_agent.csv`. Smoke version: `python3 run.py --waves 3 --wave-size 20 --defend --label smoke`
+- **Adaptive attacker (learning vs. learning)**: `python3 run.py --defend --adaptive`. Smoke version:
+  `python3 run.py --waves 3 --wave-size 20 --defend --adaptive --label adaptive`. To see the feedback
+  each wave 2+ prompt carried (it isn't logged otherwise), prefix `ADAPTIVE_DEBUG=1` — it prints one
+  `[mutate] adaptive: …` line per seed with its bypassed/blocked example counts.
 
 For proposed-but-not-yet-built CLI flags, see `attacker-pipeline/docs/future-improvements.md`.
 

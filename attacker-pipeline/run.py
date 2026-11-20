@@ -18,10 +18,14 @@ def main():
     parser.add_argument("--label", type=str, default=None, help="Tag the output CSV filename (e.g. --label demo) so it's clearly not a baseline-capture run")
     parser.add_argument("--defend", action="store_true",
                         help="Run the defensive agent after every wave (closed loop; MCP server must be running)")
+    parser.add_argument("--adaptive", action="store_true",
+                        help="Feed each wave's per-seed results (403 vs. not) back into the next "
+                             "wave's mutation prompt. Black-box: status codes only, never the WAF's "
+                             "rules or logs. Off by default, so the fixed attacker stays comparable")
     args = parser.parse_args()
 
     run(num_waves=args.waves, wave_size=args.wave_size, pause_seconds=args.pause, label=args.label,
-        defend=args.defend)
+        defend=args.defend, adaptive=args.adaptive)
 
 
 if __name__ == "__main__":

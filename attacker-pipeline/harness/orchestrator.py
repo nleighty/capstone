@@ -16,7 +16,7 @@ from payloads.seeds import SEEDS
 
 
 def build_wave(wave_id: int, wave_size: int, seeds: list[dict] | None = None,
-               generate=None) -> list[dict]:
+               generate=None, feedback: dict[str, mutate.SeedFeedback] | None = None) -> list[dict]:
     """Turn the fixed seed list into one wave of exactly `wave_size` mutated
     payloads (when the model cooperates), spread evenly across seeds.
 
@@ -38,15 +38,22 @@ def build_wave(wave_id: int, wave_size: int, seeds: list[dict] | None = None,
 
     If the wave is still short after the top-up rounds, it's returned short
     and the caller logs it - an honest smaller wave beats a silent one.
-    `seeds`/`generate` are injectable for offline tests.
+    `seeds`/`generate` are injectable for offline tests. `feedback` (adaptive
+    attacker only) maps seed id -> SeedFeedback from the previous wave; it's
+    forwarded verbatim to `generate` per seed, and None (the default) reproduces
+    the fixed attacker exactly.
     """
     seeds = SEEDS if seeds is None else seeds
     generate = mutate.generate_variants if generate is None else generate
     variants_per_seed = math.ceil(wave_size / len(seeds))
 
+    def _feedback_for(seed: dict) -> mutate.SeedFeedback | None:
+        return feedback.get(seed["id"]) if feedback else None
+
     pools: list[list[str]] = []
     for seed in seeds:
-        variants = generate(seed["payload"], seed["type"], variants_per_seed)
+        variants = generate(seed["payload"], seed["type"], variants_per_seed,
+                            feedback=_feedback_for(seed))
         pools.append(_dedupe(variants)[:variants_per_seed])
 
     for _ in range(config.WAVE_TOPUP_ROUNDS):
@@ -55,7 +62,10 @@ def build_wave(wave_id: int, wave_size: int, seeds: list[dict] | None = None,
             break
         for i in short:
             seed = seeds[i]
-            extra = generate(seed["payload"], seed["type"], variants_per_seed - len(pools[i]))
+            # Same feedback as the initial call: a top-up is still the same seed
+            # chasing the same previous-wave signal.
+            extra = generate(seed["payload"], seed["type"], variants_per_seed - len(pools[i]),
+                            feedback=_feedback_for(seed))
             pools[i] = _dedupe(pools[i] + extra)[:variants_per_seed]
 
     # Continue the round-robin where the previous wave left off.
@@ -86,12 +96,37 @@ def _dedupe(variants: list[str]) -> list[str]:
     return out
 
 
+def _feedback_from_results(
+    results: list[tuple[str, str, int]], limit: int
+) -> dict[str, mutate.SeedFeedback]:
+    """Turn one wave's fired results into per-seed feedback for the next wave.
+
+    `results` is a list of (seed_id, mutated_payload, status_code) — the ONLY
+    inputs the adaptive attacker is allowed to learn from. A 403 is a block,
+    anything else is a bypass (the same "403 = blocked" convention the metrics
+    writer uses); nothing about *why* a request was blocked enters here. Each
+    seed's two buckets are capped to `limit` examples, kept in fire order so a
+    run is reproducible and tests are stable.
+
+    Pure and side-effect free, so the collection logic can be unit-tested
+    without a live wave.
+    """
+    feedback: dict[str, mutate.SeedFeedback] = {}
+    for seed_id, mutated, status_code in results:
+        fb = feedback.setdefault(seed_id, mutate.SeedFeedback())
+        bucket = fb.blocked if status_code == 403 else fb.bypassed
+        if len(bucket) < limit:
+            bucket.append(mutated)
+    return feedback
+
+
 def run(
     num_waves: int | None = None,
     wave_size: int | None = None,
     pause_seconds: int | None = None,
     label: str | None = None,
     defend: bool = False,
+    adaptive: bool = False,
 ) -> str:
     """Fire `num_waves` waves of `wave_size` payloads each at the WAF,
     writing one row per fired payload to a fresh metrics CSV. Returns the
@@ -103,6 +138,13 @@ def run(
     included (harness/defender.py), so each later wave hits the patched WAF; its
     results go to a paired `_agent.csv`. Without it, this is the original
     attacker-only baseline run.
+
+    With `adaptive=True`, each wave's per-seed results (which variants got a 403
+    and which didn't) are fed back into the next wave's mutation prompt — "make
+    more like these, avoid those". Wave 1 runs open-loop (no prior results yet).
+    The attacker learns only from its own status codes, never from the WAF's
+    rules or logs, so it stays a black box. Off by default, so the fixed
+    attacker is still available for comparison runs.
     """
     num_waves = config.NUM_WAVES if num_waves is None else num_waves
     wave_size = config.WAVE_SIZE if wave_size is None else wave_size
@@ -112,10 +154,17 @@ def run(
     metrics = MetricsWriter(label=label)
     agent_runs = defender.AgentRunWriter(metrics.path) if defend else None
 
+    # Previous wave's per-seed feedback, carried into the next build_wave. Stays
+    # None in non-adaptive runs and for wave 1 (nothing has been fired yet).
+    feedback: dict[str, mutate.SeedFeedback] | None = None
+
     try:
         for wave_id in range(1, num_waves + 1):
-            wave = build_wave(wave_id, wave_size)
+            wave = build_wave(wave_id, wave_size, feedback=feedback)
             blocked_count = 0
+            # (seed_id, mutated, status) for this wave, only collected when
+            # adaptive — the raw material for next wave's feedback.
+            wave_results: list[tuple[str, str, int]] = []
 
             for item in wave:
                 seed = item["seed"]
@@ -128,6 +177,9 @@ def run(
                     # scan (and its poll delay) for those avoids needless log I/O.
                     matched_rule_id = log_reader.find_matched_rule(item["payload_id"])
                     blocked_count += 1
+
+                if adaptive:
+                    wave_results.append((seed["id"], item["mutated"], result.status_code))
 
                 metrics.append_row(
                     wave_id=wave_id,
@@ -152,6 +204,12 @@ def run(
                 # so, rather than hiding it - α compares waves, so a smaller
                 # one needs to be visible. The CSV row count shows the real size.
                 print(f"WARNING: wave {wave_id} is short: {len(wave)}/{wave_size} payloads")
+
+            if adaptive:
+                # Build this wave's feedback for the next build_wave. Done
+                # before the agent runs: the attacker reacts to what the WAF did
+                # to *this* wave, not to a patch the agent is about to write.
+                feedback = _feedback_from_results(wave_results, config.ADAPTIVE_EXAMPLES_PER_SEED)
 
             if agent_runs is not None:
                 # Runs after every wave, the last one included, so no wave's

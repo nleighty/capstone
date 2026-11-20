@@ -11,9 +11,10 @@ from harness import orchestrator
 from payloads.seeds import SEEDS
 
 
-def over_generator(payload, attack_type, n):
+def over_generator(payload, attack_type, n, feedback=None):
     """Like the real model on a good day: returns MORE than asked (the
-    behavior that starved the last seeds in the baseline)."""
+    behavior that starved the last seeds in the baseline). Accepts the adaptive
+    `feedback` kwarg build_wave now always passes, and ignores it."""
     return [f"{payload} v{i}" for i in range(n + 4)]
 
 
@@ -36,7 +37,7 @@ class BuildWave(unittest.TestCase):
     def test_short_seed_is_topped_up(self):
         calls = Counter()
 
-        def flaky(payload, attack_type, n):
+        def flaky(payload, attack_type, n, feedback=None):
             # First call for each seed returns only one variant (as if the
             # junk filter dropped the rest); later calls cooperate.
             calls[payload] += 1
@@ -48,7 +49,7 @@ class BuildWave(unittest.TestCase):
         self.assertEqual(len(wave), 50)
 
     def test_broken_model_gives_short_wave_without_hanging(self):
-        wave = orchestrator.build_wave(1, 50, generate=lambda p, t, n: [])
+        wave = orchestrator.build_wave(1, 50, generate=lambda p, t, n, feedback=None: [])
         self.assertEqual(wave, [])
 
     def test_payload_ids_unique(self):

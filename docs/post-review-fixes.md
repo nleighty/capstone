@@ -9,15 +9,16 @@ See "Live check" at the bottom. That's a smoke test, not an evaluation run.
 1. ✅ **Live re-check** of the two post-smoke-run changes (agent after the last wave; `nothing tripped`
    rows), with the console output saved to `defensive-agent/docs/transcripts/`. Passed 2026-11-19,
    see "Result — 2026-11-19 re-check" at the bottom.
-2. **Adaptive attacker (`run.py --adaptive`)**, the advisor's "game theory" suggestion (2026-11-13).
+2. ✅ **Adaptive attacker (`run.py --adaptive`)**, the advisor's "game theory" suggestion (2026-11-13).
    Each wave's per-seed results (got through vs. 403) are fed back into the next wave's mutation prompt
    ("more like these, avoid those"), with a few examples per seed. The attacker learns **only from status
    codes** it sees on its own requests, never from `matched_rule_id`, logs, or rules, which keeps it a
    black-box attacker. Off by default, so the fixed attacker stays available for comparison. Offline tests
    with a fake model, then a short live check. Prompt-injection as an attacker strategy is *not* included.
-   **That live check also covers §6** (uncapped replay set, built 2026-11-19): restart `server.py`
+   **That live check also covered §6** (uncapped replay set, built 2026-11-19): restart `server.py`
    first, then confirm each `verify_rule` result's `attack_replay.replayed` equals the endpoint's
-   `bypasses_since_rule` (minus `not_replayable`).
+   `bypasses_since_rule` (minus `not_replayable`). Built and live-checked 2026-11-19, both passed — see
+   "Adaptive attacker" below.
 3. **Runner CLI** for the whole system: bring up Docker, check Ollama, start the MCP server, reset
    state, run waves with or without `--defend`, and summarize the CSVs. It prints each underlying command
    before running it, so a user can see what it's doing without typing the commands by hand. It
@@ -133,8 +134,11 @@ step with `handled_counts`.
 - Tests: 4 new in `mcp-server/tests/test_log_parser.py` (`ReplaySetUncapped`). They rebuild the
   2026-11-19 case (8 bypasses, 7 shown, 8 replayed) and cover the access+audit merge, PASS → protected
   surviving a restart, and the late arrival. 33 total, all passing.
-- **Live check still to do, folded into the adaptive attacker's live check** (plan item 2): restart `server.py` first. In a `--defend` run, `attack_replay.replayed`
-  should equal the endpoint's `bypasses_since_rule` (minus `not_replayable`).
+- ✅ **Live-checked 2026-11-19**, folded into the adaptive attacker's live check (plan item 2): restarted
+  `server.py` first; the one rule written had `attack_replay.replayed` = 5, `not_replayable` = 0, and
+  `bypasses_since_rule` = 5, so `replayed == bypasses_since_rule − not_replayable` held. Caveat: no single
+  seed exceeded the per-seed cap in that wave (5 bypasses, one per seed), so it confirms the condition
+  without re-staging the 8-vs-7 gap the pre-fix re-check hit — see "Adaptive attacker" below.
 
 ---
 
@@ -230,3 +234,64 @@ Also seen:
   gives a 403, and the audit entry lists **only `1000000`**, with no CRS score. So the AI rule covers
   it, and CRS alone still doesn't. That only shows this case was covered; the gap still exists. Fixed
   the same day (§6): `verify_rule` now replays every bypass since the last PASS.
+
+---
+
+## Adaptive attacker (`run.py --adaptive`, 2026-11-19) — plan item 2
+
+The attacker was open-loop: every wave sent the same seeds and the same prompt, so variation between
+waves was only sampling noise (Step 3 review, `attacker-pipeline/docs/future-improvements.md`).
+`--adaptive` closes the attacker-side loop, the offensive half of the advisor's "you get better, I get
+better" direction (`docs/meeting-notes.md`, 2026-11-13).
+
+**What it does.** After each wave, each seed's fired variants are bucketed by the status code the WAF
+returned — 403 is a block, anything else is a bypass — and a few of each (`config.ADAPTIVE_EXAMPLES_PER_SEED`,
+default 3) are fed into that seed's *next* mutation prompt: "these got through, make more like them;
+these were blocked, avoid them." Wave 1 is open-loop (nothing fired yet). Off by default, so the fixed
+attacker stays available for the A/B eval runs.
+
+**Black-box, by construction.** The feedback is only mutated-payload strings bucketed by status code.
+The collector (`harness/orchestrator._feedback_from_results`) takes `(seed_id, mutated, status_code)`
+tuples — there is literally no slot for `matched_rule_id`, a log line, or rule text — so nothing about
+the WAF's internals can reach the attacker. It sees what a real attacker sees: the responses to its own
+requests. Prompt injection as an attacker *strategy* is deliberately out of scope.
+
+**Where the pieces live (all in `attacker-pipeline/`, nothing in `mcp-server/` or `defensive-agent/`):**
+- `core/mutate.py` — `SeedFeedback` dataclass (`bypassed`/`blocked` lists), `_feedback_block` prompt
+  renderer (each half shown only when non-empty), and a `feedback=None` arg on `generate_variants`
+  (None ⇒ byte-for-byte the old prompt).
+- `harness/orchestrator.py` — the pure `_feedback_from_results` collector; `feedback` threaded through
+  `build_wave` (forwarded per seed, including top-up calls) and `run(..., adaptive=False)`.
+- `run.py` — the `--adaptive` flag. `config.py` — `ADAPTIVE_EXAMPLES_PER_SEED`, and `ADAPTIVE_DEBUG`
+  (opt-in env flag: prints one `[mutate] adaptive: …` line per seed when a prompt carries feedback, the
+  only way to observe it since the prompt isn't otherwise logged).
+- Tests: `tests/test_adaptive.py` (12: collector bucketing/capping/per-seed, build_wave forwarding,
+  prompt rendering); existing `tests/test_build_wave.py` fakes updated for the new kwarg. 35 attacker
+  tests total, all passing offline.
+
+### Live check — 2026-11-19 (`run_adaptive_20261119_124532*.csv`)
+`reset_state.py` → restarted `server.py` → `ADAPTIVE_DEBUG=1 PYTHONUNBUFFERED=1 python3 run.py --waves 3
+--wave-size 20 --defend --adaptive --label adaptive`. Full console:
+`defensive-agent/docs/transcripts/adaptive-20261119_124532.txt`. All checks read from the files.
+
+| Wave | Bypassed | Adaptive feedback | Agent pass |
+|---|---|---|---|
+| 1 | 6/20 | none (open-loop) | `/rest/user/login` tripped (5 bypasses) → rule `1000000`, PASS first try, `mttm` 58.9s |
+| 2 | 2/20 | 16 `[mutate] adaptive:` lines, one per seed | `(none tripped)` |
+| 3 | 2/20 | 16 `[mutate] adaptive:` lines, one per seed | `(none tripped)` |
+
+1. **Feedback reached waves 2–3.** 32 `[mutate] adaptive:` lines (16 seeds × 2 waves); wave 1 has none.
+   Each line names the seed and how many bypassed/blocked examples its prompt carried. Confirmed in the
+   transcript, not just the console.
+2. **Llama didn't refuse or degrade.** No refusal strings; it kept emitting variants. One malformed
+   variant (`"DROP\u20 tabletS;--"`) hit the line-split fallback — ordinary model noise the junk
+   filter/parser absorb, not feedback-induced collapse.
+3. **§6 held live.** The one `verify_rule` (wave 1) replayed all 5 recorded login bypasses
+   (`attack_replay.replayed` = 5, `not_replayable` = 0, `bypasses_since_rule` = 5). Caveat: those 5 were
+   one per seed, so no seed exceeded the per-seed cap; this confirms `replayed == bypasses_since_rule`
+   without re-staging the 8-vs-7 gap the pre-fix re-check hit.
+
+**On the dynamic:** bypasses fell 6 → 2 → 2, but that's the *defender* — rule `1000000` closed the login
+SQLi avenue after wave 1, and the adaptive attacker couldn't reopen it in two short waves. Expected for a
+3-wave smoke run; the real "learning vs. learning" picture comes from the longer eval run C (plan item 6).
+Balanced waves also held: 60 rows, all 16 seeds every wave. This is a smoke check, not an evaluation run.

@@ -31,6 +31,19 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WAF_ERROR_LOG = os.path.join(REPO_ROOT, "waf-defense", "logs", "error.log")
 METRICS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "metrics")
 
+# Adaptive attacker (`run.py --adaptive`): how many example payloads per seed to
+# feed back into the next wave's mutation prompt — a few that got through ("make
+# more like these") and a few that were blocked ("avoid these"). Capped so the
+# prompt stays short; the attacker only ever sees its own request status codes,
+# never the WAF's rules or logs (see core/mutate.py's SeedFeedback).
+ADAPTIVE_EXAMPLES_PER_SEED = int(os.environ.get("ADAPTIVE_EXAMPLES_PER_SEED", 3))
+
+# Opt-in diagnostic: when truthy, core.mutate prints a line each time a mutation
+# prompt actually carries adaptive feedback (which seed, how many bypassed/blocked
+# examples). Off by default so normal runs stay quiet; the prompt isn't otherwise
+# logged, so this is the way to confirm wave 2+ really fed results back in.
+ADAPTIVE_DEBUG = os.environ.get("ADAPTIVE_DEBUG", "").lower() not in ("", "0", "false", "no")
+
 # Extra Ollama rounds harness/orchestrator.build_wave may spend topping up
 # seeds whose variants came back short (junk filtered out, a timeout), so a
 # wave still reaches WAVE_SIZE. Capped so a misbehaving model can't hang a run.

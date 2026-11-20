@@ -46,21 +46,32 @@ claim doesn't hold. Every baseline wave happened to be 50, but α compares waves
   log it and record the actual size, rather than failing silently.
 - Rewrite the `build_wave` docstring to match.
 
-## Attacker doesn't learn from results (found 2026-11-12, Step 3 review)
+## ✅ Attacker doesn't learn from results — DONE (2026-11-19, `run.py --adaptive`)
 
-**Planned 2026-11-19** as `run.py --adaptive` (feedback from status codes only); see `../../docs/post-review-fixes.md`, "Plan to the baseline rerun" step 2.
+Built as the first option below: the previous wave's per-seed results (which variants got a 403 and
+which didn't) are fed back into the next wave's mutation prompt — "make more like these, avoid those",
+a few examples per seed (`config.ADAPTIVE_EXAMPLES_PER_SEED`, default 3). The attacker learns **only
+from its own request status codes**, never from `matched_rule_id`, the WAF logs, or the rules, so it
+stays a black box. Off by default (`--adaptive` turns it on), so the fixed attacker is still available
+for comparison. Collection is `harness/orchestrator._feedback_from_results` (pure, status-codes-only);
+the prompt suffix is `core/mutate._feedback_block` (fed via `SeedFeedback`). Tests:
+`tests/test_adaptive.py`. Live-checked the same day — see `../../docs/post-review-fixes.md`, "Adaptive
+attacker" section. The write-up below is kept for the reasoning.
 
-The attacker is open-loop. Every wave sends the same 16 seeds and the same prompt to Llama, and
-nothing about which variants got through or were blocked goes back in. Variation between waves is just
-sampling noise. The advisor's "you get better, I get better" direction (`docs/meeting-notes.md`,
-2026-10-30) needs a feedback path, e.g.:
-- Seed the next wave's prompt with the previous wave's bypasses ("make more like these").
-- Weight seeds toward the families/endpoints that are currently bypassing.
-- Feed `analyze.py`'s lift results back in (techniques with positive lift get used more).
+**This changes what α measures:** a learning attacker against a learning defender, instead of a fixed
+attacker distribution against a learning defender. So it was a design decision made with the advisor
+("you get better, I get better", `docs/meeting-notes.md` 2026-10-30 / 2026-11-13), not just a code
+change. The fixed attacker (no `--adaptive`) is kept precisely so both can be measured (eval runs A/B
+vs. C).
 
-This changes what α measures: a learning attacker against a learning defender, instead of a fixed
-attacker distribution against a learning defender. So it's a design decision to make with the advisor,
-not just a code change.
+The other two feedback paths from the original note were **not** built (status codes alone were
+enough, and they'd pull in signals the black-box rule forbids or the harness-only analysis):
+- ~~Seed the next wave's prompt with the previous wave's bypasses~~ — this is what was built.
+- Weight seeds toward currently-bypassing families/endpoints — not built; would need the harness to
+  reshape the wave mix, a larger change than the prompt feedback.
+- Feed `analyze.py`'s lift results back in — not built; `analyze.py` is offline/harness-only by
+  design (it classifies by payload shape, the signature matching the project argues against), so
+  wiring it into the live attack loop would cross that line.
 
 ## ✅ Investigate: what causes bypasses / what are the trends in the payloads behind them? — ADDRESSED (Sprint 4.6, 2026-10-15)
 

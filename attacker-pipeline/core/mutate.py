@@ -6,12 +6,34 @@ variants. Has no concept of "wave size" or metrics — that's the harness's job.
 
 import json
 import re
+from dataclasses import dataclass, field
 from urllib.parse import unquote
 
 import httpx
 import ollama
 
 import config
+
+
+@dataclass
+class SeedFeedback:
+    """Black-box feedback for one seed, from the previous wave's results.
+
+    The adaptive attacker (`run.py --adaptive`) learns ONLY from the status
+    codes of its own requests: `bypassed` holds a few mutated payloads that got
+    a non-403 response last wave, `blocked` holds a few that got a 403. There is
+    deliberately nothing here about *why* a request was blocked — no
+    matched_rule_id, no WAF logs, no rule text — so the attacker stays a true
+    black box, like a real one that can only see the responses it gets. The
+    orchestrator builds these and caps each list to config.ADAPTIVE_EXAMPLES_PER_SEED
+    so the feedback a prompt carries stays short.
+    """
+
+    bypassed: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not self.bypassed and not self.blocked
 
 # Signals that a string is still a recognizable attack of its family, used to
 # drop degenerate "variants" the local model sometimes emits (a lone "[" or
@@ -164,7 +186,36 @@ def _safe_generate(prompt: str) -> str:
         return ""
 
 
-def generate_variants(seed_payload: str, attack_type: str, n: int) -> list[str]:
+def _feedback_block(feedback: SeedFeedback, n: int) -> str:
+    """Render one seed's previous-wave feedback as a prompt suffix, or "" when
+    there's nothing to say. Each half is included only when its bucket is
+    non-empty (a fully-blocked seed has no "make more like these" half, and a
+    fully-bypassing seed has no "avoid these" half). The examples are passed as
+    opaque strings — the model is told which got through and which didn't, never
+    why — which is the whole point: the attacker adapts to outcomes, not to the
+    defender's internals.
+    """
+    lines = ["\n\nFeedback from the previous wave against the same target:"]
+    if feedback.bypassed:
+        lines.append(
+            "- These variants were NOT blocked by the filter. Favor the same "
+            "style and techniques; produce new variants that work like these "
+            "(do not copy them verbatim):"
+        )
+        lines += [f"    {i + 1}. {v}" for i, v in enumerate(feedback.bypassed)]
+    if feedback.blocked:
+        lines.append("- These variants WERE blocked. Avoid these patterns:")
+        lines += [f"    {i + 1}. {v}" for i, v in enumerate(feedback.blocked)]
+    lines.append(f"Still respond with ONLY a raw JSON array of {n} strings.")
+    return "\n".join(lines)
+
+
+def generate_variants(
+    seed_payload: str,
+    attack_type: str,
+    n: int,
+    feedback: SeedFeedback | None = None,
+) -> list[str]:
     """Ask llama3 for up to `n` obfuscated variants of one seed payload.
 
     Has no concept of "wave size" — the orchestrator decides how many seeds
@@ -172,12 +223,27 @@ def generate_variants(seed_payload: str, attack_type: str, n: int) -> list[str]:
     May return fewer than `n` (deduped, possibly below-target) if the model
     won't cooperate even after one retry — callers should not assume an exact
     count back.
+
+    `feedback` is the adaptive attacker's optional previous-wave signal (see
+    SeedFeedback): when present and non-empty, its examples are appended to the
+    prompt to steer the next batch toward what got through and away from what
+    was blocked. Left None (the default), the prompt is identical to the
+    fixed/open-loop attacker's, so `--adaptive` is purely additive.
     """
     prompt = (
         f"{_SYSTEM_PROMPT.format(n=n)}\n\n"
         f"attack_type: {attack_type}\n"
         f"seed_payload: {seed_payload}"
     )
+    if feedback is not None and not feedback.is_empty():
+        prompt += _feedback_block(feedback, n)
+        if config.ADAPTIVE_DEBUG:
+            # The prompt is never logged otherwise, so this is how a live run
+            # confirms wave 2+ actually carried feedback (see config.ADAPTIVE_DEBUG).
+            print(
+                f"[mutate] adaptive: seed {seed_payload!r} fed "
+                f"{len(feedback.bypassed)} bypassed / {len(feedback.blocked)} blocked example(s)"
+            )
 
     # Case-insensitive dedup (the model sometimes repeats a variant with only
     # a capitalization difference) combined with the validity filter, so a
