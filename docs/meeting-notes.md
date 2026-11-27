@@ -104,3 +104,15 @@ for when this is scoped:
 - Log-borne prompt injection (`docs/sprint-4.6-direction.md` §3) is a possible attacker *strategy*:
   targeting the defender model instead of the WAF.
 - Not yet decided whether this is in scope before December.
+
+## 2026-11-20 — Adaptive attacker + runner CLI progress
+
+Showed the post-review progress: live re-check, adaptive attacker (`run.py --adaptive`), runner CLI
+(`runner/runner.py`).
+
+**Dates set:**
+- **Final presentation: 2026-12-09**, roughly 12:00–1:30pm (exact slot TBD). 30 minutes total:
+  ~15 min of slides + ~15 min of live demonstration.
+- **First draft of the presentation due 2026-12-04** (advisor meeting).
+- **Report:** ideally done by 2026-12-04 too, but it can be finished after the presentation. The
+  presentation takes priority.

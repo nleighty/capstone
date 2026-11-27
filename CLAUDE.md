@@ -2,7 +2,7 @@
 
 **Title:** An Adaptive Defense Framework Against GenAI-Driven Web Payload Polymorphism Using MCP
 **Student:** Nic Leighty | **Advisor:** Jiazhen Zhou | **Semester:** Fall 2026 | **Credits:** 6
-Full proposal: `docs/proposal/Proposal_20261004.pdf` (current — Claude on the defensive side;
+Full proposal: `docs/proposal/Proposal_20261004.pdf` (grant application with the evaluation plan + budget: `docs/proposal/Graduate_Research_Grant_Application_Project_Description.pdf`) (current — Claude on the defensive side;
 architecture diagram also at `docs/proposal/diagram_20261004.png`). The original July versions
 (`Proposal_20260703.pdf`, `diagram_20260609.png`) are kept alongside for history only.
 
@@ -51,7 +51,9 @@ direction; Claude explains, answers, and quizzes — it should not make code cha
 steps unprompted during this phase. Any further build work (e.g. the parked agent auto-trigger
 that Sprint 5 metrics depend on) is decided by the student based on how the review goes.
 5. Automated Testing — multi-wave attack loops, collect MTTM/α/RGI/RFPR (⏸ pending the review)
-6. Report finalization, then presentation prep (target: early–mid December 2026)
+6. Presentation, then report finalization. **Presentation 2026-12-09** (30 min: ~15 slides + ~15
+   live demo); **first draft of the deck due 2026-12-04**. The report can finish after the
+   presentation, which takes priority — see `docs/meeting-notes.md`, 2026-11-20 entry.
 
 Timeline is agile/subject to change per the proposal — treat sprint summaries as the source of truth
 over this list.
@@ -94,6 +96,11 @@ over this list.
     harness-driven agent auto-trigger (`run.py --defend`), per-endpoint threshold reset after a verified
     rule, the protected replay list against coverage loss, code-bound rule_id/endpoint in the agent, and
     balanced waves. Offline-tested; the live-check steps are at the bottom.
+  - `docs/evaluation-plan.md` — the evaluation (objective 4) plan: arms A/B/C + the grant's second-tier
+    studies, trial counts, cost, what must be built first (RFPR benign set, `runner metrics`,
+    `runner trials`), and the results as they come in. Adapts the grant application's test plan
+    (`docs/proposal/Graduate_Research_Grant_Application_Project_Description.pdf`, which also holds
+    the $150 API budget).
   - `docs/common-commands.md` — day-to-day operation quick reference: a "Runner" section at the top
     (`runner/runner.py`), then the manual commands it wraps (Docker, Ollama, running the
     attacker pipeline, running the MCP server, running the defensive agent) spanning `waf-defense/`,

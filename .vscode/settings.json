@@ -5,6 +5,11 @@
     "python.analysis.diagnosticMode": "workspace",
     // Keep library code out of the Problems panel - we only want diagnostics
     // for our own source, not the three per-subproject virtualenvs.
+    // runner/ has no __init__.py, so from the workspace root Pylance resolves
+    // `import runner` in runner/tests/ to the runner/ *folder* instead of
+    // runner/runner.py (the tests themselves run from runner/, where the import
+    // is correct). Adding runner/ to the search path makes the editor match.
+    "python.analysis.extraPaths": ["runner"],
     "python.analysis.exclude": [
         "**/.venv/**",
         "**/__pycache__/**"

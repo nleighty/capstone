@@ -106,7 +106,9 @@ class OtherCommands(unittest.TestCase):
         steps = runner.test_steps()
         self.assertEqual([n for n, _ in steps],
                          ["mcp-server", "defensive-agent", "attacker-pipeline", "runner"])
-        for name, step in steps[:3]:
+        for _name, step in steps[:3]:
+            # Step.cwd is typed `str | None`; a venv step always sets it.
+            assert step.cwd is not None
             self.assertEqual(step.argv[0], os.path.join(step.cwd, ".venv/bin/python"))
             self.assertEqual(step.argv[1:], ["-m", "unittest", "discover", "-s", "tests", "-t", "."])
         self.assertEqual(steps[3][1].argv[0], "python3")

@@ -184,6 +184,9 @@ def execute(step: Step, tag: str, dry_run: bool, capture: bool = False,
 
 def _run_tee(step: Step, env: dict) -> subprocess.CompletedProcess:
     """`cmd 2>&1 | tee file`, in Python: stream each line to the terminal and the file."""
+    # Only called when step.tee is set (see execute()); the assert tells the
+    # type checker so, since Step.tee is typed `str | None`.
+    assert step.tee is not None
     os.makedirs(os.path.dirname(step.tee) or ".", exist_ok=True)
     with open(step.tee, "w") as out, subprocess.Popen(
             step.argv, cwd=step.cwd, env=env, stdout=subprocess.PIPE,
@@ -193,6 +196,8 @@ def _run_tee(step: Step, env: dict) -> subprocess.CompletedProcess:
         out.write(f"# {datetime.now().isoformat(timespec='seconds')}\n")
         out.write(f"$ {step.display}\n\n")
         out.flush()
+        # stdout=PIPE above guarantees proc.stdout exists; again, for the type checker.
+        assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()

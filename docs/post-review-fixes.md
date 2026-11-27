@@ -34,7 +34,8 @@ See "Live check" at the bottom. That's a smoke test, not an evaluation run.
    convention in `CLAUDE.md` when this starts. First thing to cut if time runs short.
 6. Evaluation runs: A = fixed attacker vs. CRS only (the baseline rerun), B = fixed attacker vs. CRS +
    agent (`--defend`), C = adaptive attacker vs. CRS + agent (`--defend --adaptive`, the "you get better, I
-   get better" comparison). Then the RGI script.
+   get better" comparison). Then the RGI script. **Superseded 2026-11-27 by `docs/evaluation-plan.md`**
+   (the grant's test plan adapted to the current system; the RGI script became `runner metrics`).
 
 ---
 
